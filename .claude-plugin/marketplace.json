@@ -4,12 +4,26 @@
     "name": "t4ku",
     "url": "https://github.com/t4ku"
   },
-  "description": "Public Claude Code skills by t4ku",
   "plugins": [
     {
       "name": "add-github-permalinks",
-      "description": "Add GitHub permalinks with fixed SHA/commit references to research documentation",
-      "source": "./add-github-permalinks"
+      "source": "./add-github-permalinks",
+      "description": "Add GitHub permalinks with fixed SHA/commit references to code snippets in research/docs."
+    },
+    {
+      "name": "loop-design",
+      "source": "./loop-design",
+      "description": "やりたいことを1行で言うと、B 型 loop engineering の 7 要素 (context / feedback / verification gate / termination / error handling / state / cost guard) を埋めた loop spec をコピペ可能な形で生"
+    },
+    {
+      "name": "speech-slides",
+      "source": "./speech-slides",
+      "description": "Generate PPTX slide decks for 5-minute Monday morning speeches at Syla. Triggered when user asks to create slides, make a presentation, or generate a deck from"
+    },
+    {
+      "name": "youtube-slide-maker",
+      "source": "./youtube-slide-maker",
+      "description": "YouTube動画からスライドまたは切り抜き動画を生成する。字幕ベースでキーフレームを選定しffmpegで抽出、Marpスライド or 切り抜きクリップを出力。Use when user asks to create slides from a YouTube video, extract key frames, su"
     }
   ]
 }
