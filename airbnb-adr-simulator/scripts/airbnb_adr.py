@@ -6,7 +6,7 @@ Fetches income estimates from the Airbnb host simulator GraphQL API.
 Usage:
     python3 airbnb_adr.py "すすきの駅"
     python3 airbnb_adr.py "渋谷駅"
-    AIRBNB_API_KEY=xxx python3 airbnb_adr.py "難波駅"
+    AIRBNB_API_KEY=<key> AIRBNB_GQL_HASH=<hash> python3 airbnb_adr.py "難波駅"
 
 Requires:
     - AIRBNB_API_KEY env var (or set inline)
@@ -20,7 +20,9 @@ from urllib.parse import quote
 
 # ─── Config ─────────────────────────────────────────────
 API_KEY  = os.environ.get("AIRBNB_API_KEY", "")
-GQL_HASH = "a929d4d832695d0dc9344afb283387ecc8140f6e58b5a1949051898afe6e1167"
+# GQL_HASH: get from DevTools → Network → GetHostEstimateData request
+#   → Payload → extensions.persistedQuery.sha256Hash
+GQL_HASH = os.environ.get("AIRBNB_GQL_HASH", "")
 ENDPOINT = "https://www.airbnb.jp/api/v3/GetHostEstimateData?operationName=GetHostEstimateData&locale=ja&currency=JPY"
 
 # ─── Geocoding (Nominatim) ───────────────────────────────
@@ -193,6 +195,9 @@ def print_result(r: dict):
 if __name__ == "__main__":
     if not API_KEY:
         print("Error: AIRBNB_API_KEY not set", file=sys.stderr)
+        sys.exit(1)
+    if not GQL_HASH:
+        print("Error: AIRBNB_GQL_HASH not set (get from DevTools)", file=sys.stderr)
         sys.exit(1)
 
     areas = sys.argv[1:] if len(sys.argv) > 1 else ["すすきの駅"]

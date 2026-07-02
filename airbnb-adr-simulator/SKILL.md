@@ -13,20 +13,37 @@ Airbnb 公式ホストシミュレーターと同じデータを GraphQL API で
 
 ## Setup
 
-環境変数:
 ```bash
-export AIRBNB_API_KEY="d306zoyjsyarp7ifhu67rjxn52tv0t20"
+export AIRBNB_API_KEY="<your_key>"
 ```
 
-APIキーの再取得方法: Airbnb サイトのJSバンドルから `X-Airbnb-API-Key` を抽出。
-詳細: `maisoku-analysis` スキルの `references/airbnb-market-research.md`
+### API キーの取得方法
+
+Airbnb は公式には API キーを配布していないが、ホストシミュレーターページから抽出できる。
+
+**方法1: DevTools で取得（推奨）**
+1. ブラウザで https://www.airbnb.jp/host/homes を開く
+2. DevTools → Network タブ → フィルタに `GetHostEstimateData` と入力
+3. リクエストをクリック → Request Headers の `X-Airbnb-API-Key` の値をコピー
+
+**方法2: JS バンドルから取得**
+```bash
+curl -s "https://www.airbnb.jp/host/homes" \
+  | grep -o '"X-Airbnb-API-Key":"[^"]*"' | head -1
+```
+
+同様に persisted query hash も DevTools で取得:
+- Request Payload → `extensions.persistedQuery.sha256Hash` の値をコピー
+- `scripts/airbnb_adr.py` の `GQL_HASH` に設定する
+
+> ⚠️ キーとハッシュはローテーションされることがあるので、動かなくなったら再取得する。
 
 ## Usage
 
 ```bash
-python3 ~/.hermes/skills/airbnb-adr-simulator/scripts/airbnb_adr.py "すすきの駅"
-python3 ~/.hermes/skills/airbnb-adr-simulator/scripts/airbnb_adr.py "渋谷駅"
-python3 ~/.hermes/skills/airbnb-adr-simulator/scripts/airbnb_adr.py "すすきの, 札幌市"
+python3 scripts/airbnb_adr.py "すすきの駅"
+python3 scripts/airbnb_adr.py "渋谷駅"
+python3 scripts/airbnb_adr.py "すすきの, 札幌市"
 ```
 
 出力例:
@@ -48,9 +65,9 @@ python3 ~/.hermes/skills/airbnb-adr-simulator/scripts/airbnb_adr.py "すすき�
 ## API Details
 
 - **Endpoint**: `POST https://www.airbnb.jp/api/v3/GetHostEstimateData`
-- **API Key header**: `X-Airbnb-API-Key: <key>`
+- **API Key header**: `X-Airbnb-API-Key: <key>` (DevTools から取得)
 - **Operation**: `GetHostEstimateData` (persisted query)
-- **Hash**: `a929d4d832695d0dc9344afb283387ecc8140f6e58b5a1949051898afe6e1167`
+- **Hash**: DevTools の Request Payload → `extensions.persistedQuery.sha256Hash`
 - **location 型**: `{"searchQuery": "エリア名"}` ← `{"query": ...}` ではない
 - **durationGranularity**: `["MONTHLY"]` 必須
 
@@ -74,4 +91,4 @@ Nominatim で駅座標を取得し、API が返すリスト物件の重心との
 
 ## Script
 
-`scripts/airbnb_adr.py` — スタンドアロンで動く CLI スクリプト。
+`scripts/airbnb_adr.py` — スタンドアロンで動く CLI スクリプト。`GQL_HASH` は取得後に設定が必要。

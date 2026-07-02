@@ -28,7 +28,7 @@ export HERMES_VENV_PYTHON="/path/to/.venv/bin/python"  # hermes-agentのvenv Pyt
 
 ```bash
 # 通常実行（直近1日のメールをスキャン）
-python3.11 ~/.hermes/skills/real-estate-property-screening/scripts/property_screening.py
+python3.11 scripts/property_screening.py
 
 # 直近2日分
 python3.11 ... --days 2
@@ -45,7 +45,7 @@ python3.11 ... --force
 ```bash
 # 毎日 06:00/13:00/19:00 JST (= UTC 21:00/04:00/10:00)
 # hermes cron で以下のスクリプトを設定:
-# python3.11 ~/.hermes/skills/real-estate-property-screening/scripts/property_screening.py
+# python3.11 scripts/property_screening.py
 ```
 
 ## Investment Patterns (5パターン)

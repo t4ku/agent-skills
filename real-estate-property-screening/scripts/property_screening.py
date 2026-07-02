@@ -31,7 +31,8 @@ KB_PASS    = os.environ.get("KENBIYA_PASSWORD", "")
 GMAIL_ADDR = os.environ.get("GMAIL_ADDRESS", "")
 SPREADSHEET_ID = os.environ.get("SCREENING_SPREADSHEET_ID", "")
 AIRBNB_API_KEY = os.environ.get("AIRBNB_API_KEY", "")
-AIRBNB_GQL_HASH = "a929d4d832695d0dc9344afb283387ecc8140f6e58b5a1949051898afe6e1167"
+AIRBNB_GQL_HASH = os.environ.get("AIRBNB_GQL_HASH", "")
+# Get hash from DevTools → Network → GetHostEstimateData → Payload → extensions.persistedQuery.sha256Hash
 
 # hermes-agent venv Python path (for googleapiclient)
 VENV_PY_PATH = os.environ.get(
@@ -40,7 +41,12 @@ VENV_PY_PATH = os.environ.get(
 )
 
 PROCESSED_DB = Path.home() / ".hermes" / "maisoku_processed.json"
-GAPI         = "python ~/.hermes/skills/productivity/google-workspace/scripts/google_api.py"
+GAPI = os.environ.get(
+    "GOOGLE_API_SCRIPT",
+    # Default: Claude Code (hermes) google-workspace skill path
+    # Set GOOGLE_API_SCRIPT to your own google_api.py path if different
+    str(Path.home() / ".hermes/skills/productivity/google-workspace/scripts/google_api.py")
+)
 CACHE_DIR    = Path("/tmp/property_screening")
 CACHE_DIR.mkdir(exist_ok=True)
 KB_COOKIE    = Path("/tmp/kb_cookies.txt")
@@ -789,11 +795,13 @@ def kb_get_detail(url):
 def write_to_spreadsheet(entries):
     """Append screening results to Google Sheets (dedup by msg_id)."""
     import importlib.util, pathlib
-    spec = importlib.util.spec_from_file_location(
-        "google_api",
+    google_api_path = os.environ.get(
+        "GOOGLE_API_SCRIPT",
+        # Default: Claude Code (hermes) google-workspace skill path
         str(pathlib.Path.home() / ".hermes/skills/productivity/google-workspace/scripts/google_api.py")
     )
-    mod = importlib.util.module_from_spec(spec)
+    spec = importlib.util.spec_from_file_location("google_api", google_api_path)
+    mod  = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
     # Add hermes venv site-packages to path (googleapiclient lives there)
