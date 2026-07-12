@@ -28,6 +28,10 @@ claude-code-skills/
 | Skill | Description |
 |-------|-------------|
 | `add-github-permalinks` | Add permanent GitHub URLs to documentation |
+| `loop-design` | Fill a B-type loop-engineering spec (7 elements) as copy-pasteable output |
+| `speech-slides` | Generate PPTX decks for 5-min Monday morning speeches |
+| `youtube-slide-maker` | Build Marp slides / clip videos from a YouTube video |
+| `skill-vendor` | Vendor an external skill into your repo with license + provenance/attribution |
 
 ---
 
