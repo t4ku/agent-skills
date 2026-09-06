@@ -1,5 +1,0 @@
-{
-  "name": "show-me",
-  "version": "0.1.0",
-  "description": "Explain the current topic visually — pseudocode, call trees, component/file trees, Mermaid diagrams, diffs, or a focused HTML artifact."
-}

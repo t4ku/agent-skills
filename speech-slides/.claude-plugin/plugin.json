@@ -1,5 +1,0 @@
-{
-  "name": "speech-slides",
-  "version": "0.1.0",
-  "description": "Generate PPTX slide decks for 5-minute Monday morning speeches, using PptxGenJS with D3 charts and image integration."
-}

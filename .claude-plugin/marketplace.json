@@ -6,34 +6,43 @@
   },
   "plugins": [
     {
-      "name": "add-github-permalinks",
-      "source": "./add-github-permalinks",
-      "description": "Add GitHub permalinks with fixed SHA/commit references to code snippets in research/docs."
+      "name": "engineering",
+      "source": "./",
+      "strict": false,
+      "description": "開発作業そのものを助けるスキル。コードを指すドキュメントに GitHub permalink を貼る、いま話している構造やフローを図で見せる。",
+      "skills": [
+        "./skills/add-github-permalinks",
+        "./skills/show-me"
+      ]
     },
     {
-      "name": "loop-design",
-      "source": "./loop-design",
-      "description": "やりたいことを1行で言うと、B 型 loop engineering の 7 要素 (context / feedback / verification gate / termination / error handling / state / cost guard) を埋めた loop spec をコピペ可能な形で生"
+      "name": "agent-lab",
+      "source": "./",
+      "strict": false,
+      "description": "エージェントとスキルを作る側のスキル。外部スキルをライセンス・provenance 付きで取り込む、自走ループの spec を 7 要素で書く。",
+      "skills": [
+        "./skills/loop-design",
+        "./skills/skill-vendor"
+      ]
     },
     {
-      "name": "speech-slides",
-      "source": "./speech-slides",
-      "description": "Generate PPTX slide decks for 5-minute Monday morning speeches at Syla. Triggered when user asks to create slides, make a presentation, or generate a deck from"
+      "name": "presentation",
+      "source": "./",
+      "strict": false,
+      "description": "人に見せる資料を作るスキル。スピーチ原稿から PPTX を生成する、YouTube 動画から Marp スライドや切り抜きを作る。",
+      "skills": [
+        "./skills/speech-slides",
+        "./skills/youtube-slide-maker"
+      ]
     },
     {
-      "name": "youtube-slide-maker",
-      "source": "./youtube-slide-maker",
-      "description": "YouTube動画からスライドまたは切り抜き動画を生成する。字幕ベースでキーフレームを選定しffmpegで抽出、Marpスライド or 切り抜きクリップを出力。Use when user asks to create slides from a YouTube video, extract key frames, su"
-    },
-    {
-      "name": "show-me",
-      "source": "./show-me",
-      "description": "Explain the current topic visually — pseudocode, call trees, component/file trees, Mermaid diagrams, diffs, or a focused HTML artifact. Use when the user asks to show / diagram / visualize / illustrate what's going on, 図で見せて / 図解して / 構造を見せて / フローを見せて. Vendored from humanlayer/skills (MIT), adapted for Claude Code."
-    },
-    {
-      "name": "skill-vendor",
-      "source": "./skill-vendor",
-      "description": "Vendor (copy-import) a single external Claude Code skill into your own skills repo with license compliance and full provenance/attribution. Deterministic idempotent primitive: fetch by ref, gate on license, copy, inject provenance frontmatter, ship LICENSE, add Credits, record ledger. Use when asked to vendor/import/clone/borrow a skill with attribution, or スキルを取り込む/vendoring."
+      "name": "integrations",
+      "source": "./",
+      "strict": false,
+      "description": "外部サービスの API を叩く / 操作するスキル。Airbnb 公式 GraphQL API からエリアの ADR・稼働・月収試算を取得する。",
+      "skills": [
+        "./skills/airbnb-adr-simulator"
+      ]
     }
   ]
 }
