@@ -1,5 +1,0 @@
-{
-  "name": "add-github-permalinks",
-  "version": "0.1.0",
-  "description": "Add GitHub permalinks with fixed SHA/commit references to code snippets in research/docs."
-}
