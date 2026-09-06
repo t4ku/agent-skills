@@ -37,7 +37,7 @@ Not a submodule. Not a raw `cp`. This is the primitive that turns "I want that s
 - `<upstream-ref>` — one of:
   - `owner/repo/path/to/skill@<sha-or-tag-or-branch>` (SHA strongly preferred)
   - a GitHub URL to the skill folder (blob/tree URL; extract owner/repo/ref/path)
-- `--into` — target skills dir. Default: the current repo's convention (a top-level `<skill>/` dir for a marketplace repo, or `.claude/skills/<skill>/` for a vault). Infer from where you are.
+- `--into` — target skills dir. Default: the current repo's convention (`skills/<skill>/` for a marketplace repo like `t4ku/agent-skills`, or `.claude/skills/<skill>/` for a vault). Infer from where you are.
 - `--as` — rename on import (default: keep upstream folder name).
 - `--adapted` — you intend to modify after import; sets `provenance: adapted` (default `verbatim`).
 
