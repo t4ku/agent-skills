@@ -30,13 +30,22 @@ cd "$OUT"
 ```bash
 # Video (prefer 720p to save space)
 yt-dlp -f 'bv[height<=720]+ba/b[height<=720]' \
+  --merge-output-format mp4 \
   --write-auto-subs --write-subs --sub-lang en,ja --sub-format vtt \
   --convert-subs srt \
   -o 'video.%(ext)s' "$URL"
 ```
 
+`--merge-output-format mp4` を付けること。付けないと結合結果が `video.webm` /
+`video.mkv` になり、以降の `video.mp4` 決め打ちの ffmpeg コマンドが全部落ちる。
+それでも拡張子が変わることがあるので、続くコマンドは実ファイルを拾って使う:
+
+```bash
+VIDEO=$(ls video.mp4 video.mkv video.webm 2>/dev/null | head -1)
+```
+
 Fields of interest after download:
-- `video.mp4` / `video.webm` — full video
+- `$VIDEO`（通常 `video.mp4`） — full video
 - `video.en.srt` or `video.ja.srt` — transcript
 
 ### 3. Analyze transcript → select keyframes
@@ -58,7 +67,7 @@ For each, output:
 ### 4. Extract frames
 ```bash
 # Per keyframe (ts = HH:MM:SS)
-ffmpeg -ss "$ts" -i video.mp4 -vframes 1 -q:v 2 "frames/$(printf '%02d' $i)-$slug.png"
+ffmpeg -ss "$ts" -i "$VIDEO" -vframes 1 -q:v 2 "frames/$(printf '%02d' $i)-$slug.png"
 ```
 
 Tips:
@@ -69,10 +78,10 @@ Tips:
 ### 5. Extract clips (clips/both mode)
 ```bash
 # Lossless cut (fast, no re-encode)
-ffmpeg -ss "$start" -to "$end" -i video.mp4 -c copy "clips/$(printf '%02d' $i)-$slug.mp4"
+ffmpeg -ss "$start" -to "$end" -i "$VIDEO" -c copy "clips/$(printf '%02d' $i)-$slug.mp4"
 
 # Re-encode (needed if keyframe alignment matters, smooth cut)
-ffmpeg -ss "$start" -to "$end" -i video.mp4 -c:v libx264 -c:a aac "clips/$(printf '%02d' $i)-$slug.mp4"
+ffmpeg -ss "$start" -to "$end" -i "$VIDEO" -c:v libx264 -c:a aac "clips/$(printf '%02d' $i)-$slug.mp4"
 ```
 
 For SNS切り抜き: consider vertical crop

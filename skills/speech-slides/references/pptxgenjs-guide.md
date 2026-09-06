@@ -28,11 +28,11 @@ const C = {
 
 // Helper: rounded rectangle card
 function box(slide, pres, x, y, w, h, fill, topBarColor) {
-  slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+  slide.addShape(pres.ShapeType.roundRect, {
     x, y, w, h, fill: { color: fill }, rectRadius: 0.1
   });
   if (topBarColor) {
-    slide.addShape(pres.shapes.RECTANGLE, {
+    slide.addShape(pres.ShapeType.rect, {
       x, y, w, h: 0.07, fill: { color: topBarColor }
     });
   }
@@ -75,10 +75,10 @@ console.log("OK: output.pptx");
 
 ### Shapes
 ```javascript
-pres.shapes.RECTANGLE          // 矩形
-pres.shapes.ROUNDED_RECTANGLE  // 角丸矩形
-pres.shapes.OVAL               // 楕円
-pres.shapes.LINE               // 線
+pres.ShapeType.rect       // 矩形
+pres.ShapeType.roundRect  // 角丸矩形
+pres.ShapeType.ellipse    // 楕円
+pres.ShapeType.line       // 線
 ```
 
 ### Text with mixed formatting
@@ -122,7 +122,7 @@ slide.addImage({ path: "https://example.com/img.png", x: 1, y: 1.5, w: 8, h: 4 }
 
 ### Native Charts (simple cases — no D3 needed)
 ```javascript
-slide.addChart(pres.charts.BAR, [
+slide.addChart(pres.ChartType.bar, [
   { name: "Series", labels: ["Q1","Q2","Q3"], values: [100, 150, 200] }
 ], {
   x: 1, y: 1.5, w: 8, h: 4,

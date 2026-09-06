@@ -1,7 +1,7 @@
 ---
 name: speech-slides
 version: "0.1.0"
-description: Generate PPTX slide decks for 5-minute Monday morning speeches at Syla. Triggered when user asks to create slides, make a presentation, or generate a deck from a speech script. Uses PptxGenJS directly (NOT html2pptx.js). Provides 4 slide template patterns, D3.js chart generation, and AI image integration.
+description: Generate PPTX slide decks from a speech script or talking points — built for the 5-minute Monday morning speeches at Syla. Use when the user already has a script / 原稿 / メモ and asks to turn it into slides, a deck, or a presentation. Not for slides derived from a video — use youtube-slide-maker for that. Uses PptxGenJS directly (NOT html2pptx.js). Provides 4 slide template patterns, D3.js chart generation, and AI image integration.
 ---
 
 # Speech Slides Skill

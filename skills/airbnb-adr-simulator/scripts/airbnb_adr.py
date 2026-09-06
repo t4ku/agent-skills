@@ -68,9 +68,12 @@ def parse_numeric_text(value: str) -> float:
         return float(filtered)
 
     digits_after = len(filtered) - decimal_pos - 1
-    separator_count = filtered.count(".") + filtered.count(",")
-    if separator_count == 1 and digits_after == 3:
-        return float(filtered[:decimal_pos] + filtered[decimal_pos + 1:])
+    integer_before = "".join(ch for ch in filtered[:decimal_pos] if ch.isdigit())
+    # 末尾セパレータの後ろがちょうど3桁なら桁区切り扱い（¥1,234 / ¥1,234,567）。
+    # セパレータが2つ以上でも全部落とす。"0.123" のように整数部が 0 だけのものは
+    # 真の小数なので除外する。
+    if digits_after == 3 and integer_before.lstrip("0"):
+        return float("".join(ch for ch in filtered if ch.isdigit()))
 
     integer_part = "".join(ch for ch in filtered[:decimal_pos] if ch.isdigit())
     fractional_part = "".join(ch for ch in filtered[decimal_pos + 1:] if ch.isdigit())
@@ -243,9 +246,16 @@ if __name__ == "__main__":
 
     areas = sys.argv[1:] if len(sys.argv) > 1 else ["すすきの駅"]
 
+    exit_code = 0
     for area in areas:
         r = get_adr(area)
         if r["error"]:
             print(f"Error: {r['error']}", file=sys.stderr)
+            exit_code = 1
         else:
             print_result(r)
+            # 取得失敗した部屋タイプがあれば呼び出し元に伝える（黙って 0 で終わらない）
+            if any((r.get(k) or {}).get("error") for k in ("entire", "private")):
+                exit_code = 1
+
+    sys.exit(exit_code)
