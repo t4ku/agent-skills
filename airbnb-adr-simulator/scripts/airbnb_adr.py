@@ -29,11 +29,13 @@ ENDPOINT = "https://www.airbnb.jp/api/v3/GetHostEstimateData?operationName=GetHo
 def geocode(query: str):
     """Returns (lat, lon, display_name) or (None, None, '')."""
     r = subprocess.run(
-        ["curl", "-s",
+        ["curl", "-s", "--fail-with-body",
          f"https://nominatim.openstreetmap.org/search?q={quote(query)}&format=json&limit=1&accept-language=ja",
          "-H", "User-Agent: airbnb-adr-simulator/1.0"],
         capture_output=True, text=True, timeout=10
     )
+    if r.returncode != 0:
+        raise RuntimeError(f"Geocode request failed: {r.stderr.strip() or f'curl exit {r.returncode}'}")
     try:
         data = json.loads(r.stdout)
         if data:
@@ -80,7 +82,7 @@ def fetch_estimate(search_query: str, room_type: str, bedroom: int = 1, person_c
 
     try:
         r = subprocess.run(
-            ["curl", "-s", "-X", "POST", ENDPOINT,
+            ["curl", "-s", "--fail-with-body", "-X", "POST", ENDPOINT,
              "-H", "Content-Type: application/json",
              "-H", f"X-Airbnb-API-Key: {API_KEY}",
              "-H", "User-Agent: Mozilla/5.0",
@@ -146,7 +148,11 @@ def get_adr(area: str) -> dict:
 
     # Geocode
     time.sleep(1.1)  # Nominatim rate limit
-    lat, lon, display = geocode(area)
+    try:
+        lat, lon, display = geocode(area)
+    except Exception as e:
+        result["error"] = str(e)
+        return result
     if lat is None:
         result["error"] = f"Geocode failed for: {area}"
         return result
