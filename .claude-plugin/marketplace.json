@@ -24,6 +24,11 @@
       "name": "youtube-slide-maker",
       "source": "./youtube-slide-maker",
       "description": "YouTube動画からスライドまたは切り抜き動画を生成する。字幕ベースでキーフレームを選定しffmpegで抽出、Marpスライド or 切り抜きクリップを出力。Use when user asks to create slides from a YouTube video, extract key frames, su"
+    },
+    {
+      "name": "show-me",
+      "source": "./show-me",
+      "description": "Explain the current topic visually — pseudocode, call trees, component/file trees, Mermaid diagrams, diffs, or a focused HTML artifact. Use when the user asks to show/diagram/visualize/illustrate what's going on, 図で見せて / 図解して. Vendored from humanlayer/skills (MIT)."
     }
   ]
 }
