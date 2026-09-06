@@ -10,7 +10,7 @@ Generate SVG charts with D3.js and embed in PPTX slides as images.
 ## Setup
 
 ```bash
-npm install d3 sharp  # sharp for SVG→PNG conversion
+npm install d3 jsdom sharp  # jsdom for the DOM D3 needs in Node, sharp for SVG→PNG
 ```
 
 ## SVG → PNG → PPTX Pipeline
@@ -159,17 +159,17 @@ For simple charts, skip D3 and use PptxGenJS built-in:
 
 ```javascript
 // Bar chart
-slide.addChart(pres.charts.BAR, [
+slide.addChart(pres.ChartType.bar, [
   { name: "達成率", labels: ["W03","W04","W05"], values: [43, 71, 29] }
 ], { x: 1, y: 1.5, w: 8, h: 4, showValue: true, valAxisMaxVal: 100 });
 
 // Line chart
-slide.addChart(pres.charts.LINE, [
+slide.addChart(pres.ChartType.line, [
   { name: "Growth", labels: ["Jan","Feb","Mar"], values: [10, 25, 45] }
 ], { x: 1, y: 1.5, w: 8, h: 4, lineSmooth: true });
 
 // Pie chart
-slide.addChart(pres.charts.PIE, [
+slide.addChart(pres.ChartType.pie, [
   { name: "Distribution", labels: ["A","B","C"], values: [40, 35, 25] }
 ], { x: 2, y: 1, w: 6, h: 4, showPercent: true });
 ```

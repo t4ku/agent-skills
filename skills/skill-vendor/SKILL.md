@@ -48,11 +48,23 @@ Resolve the ref to a **concrete commit SHA** — this is non-negotiable. SKILL.m
 
 ```bash
 # via git (sparse)  — preferred, gets the real tree + SHA
-git clone --no-checkout --depth 1 --filter=blob:none <repo-url> <tmp>
+git clone --no-checkout --filter=blob:none <repo-url> <tmp>   # NOT --depth 1
 git -C <tmp> sparse-checkout set <path>
 git -C <tmp> checkout <ref>
 SHA=$(git -C <tmp> rev-parse HEAD)
 # or via gh api if git is unavailable:  gh api repos/<owner>/<repo>/commits/<ref> --jq .sha
+```
+
+`--depth 1` を付けないこと。浅いクローンは既定ブランチの先端しか持たないので、
+続く `checkout <ref>` が任意の SHA / タグで落ちる。どうしても浅くしたいなら
+ref を名指しで fetch する:
+
+```bash
+git init <tmp> && git -C <tmp> remote add origin <repo-url>
+git -C <tmp> fetch --depth 1 --filter=blob:none origin <ref>
+git -C <tmp> sparse-checkout set <path>
+git -C <tmp> checkout FETCH_HEAD
+SHA=$(git -C <tmp> rev-parse HEAD)
 ```
 
 ### 2. Detect license and GATE  ⛔

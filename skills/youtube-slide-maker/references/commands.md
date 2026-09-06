@@ -6,6 +6,7 @@
 ```bash
 # Full package: 720p video + auto+manual subs (en/ja), convert to SRT
 yt-dlp -f 'bv[height<=720]+ba/b[height<=720]' \
+  --merge-output-format mp4 \
   --write-auto-subs --write-subs \
   --sub-lang 'en,ja,en-US,ja-JP' --sub-format vtt \
   --convert-subs srt \
