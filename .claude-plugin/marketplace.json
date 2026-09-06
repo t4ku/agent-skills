@@ -28,7 +28,7 @@
     {
       "name": "show-me",
       "source": "./show-me",
-      "description": "Explain the current topic visually — pseudocode, call trees, component/file trees, Mermaid diagrams, diffs, or a focused HTML artifact. Use when the user asks to show/diagram/visualize/illustrate what's going on, 図で見せて / 図解して. Vendored from humanlayer/skills (MIT)."
+      "description": "Explain the current topic visually — pseudocode, call trees, component/file trees, Mermaid diagrams, diffs, or a focused HTML artifact. Use when the user asks to show / diagram / visualize / illustrate what's going on, 図で見せて / 図解して / 構造を見せて / フローを見せて. Vendored from humanlayer/skills (MIT), adapted for Claude Code."
     },
     {
       "name": "skill-vendor",

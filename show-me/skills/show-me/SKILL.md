@@ -1,6 +1,15 @@
 ---
 name: show-me
-description: Help the user understand the current topic visually with concise diagrams, code-shape sketches, and focused HTML artifacts.
+description: >
+  Help the user understand the current topic visually with concise diagrams,
+  code-shape sketches, and focused HTML artifacts. Use when the user asks to
+  show / diagram / visualize / sketch / illustrate what is going on, asks
+  "what does this look like", "how does this flow", "show me the structure",
+  or in Japanese 図で見せて / 図解して / 図にして / 構造を見せて /
+  フローを見せて / 全体像を見せて / どうつながってるか見せて. Also use it
+  proactively when an explanation is running long and a call tree, file tree,
+  component tree, diff, Mermaid diagram, or a small HTML artifact would land
+  faster than prose.
 license: MIT
 metadata:
   author: HumanLayer (@humanlayer)
@@ -8,10 +17,12 @@ metadata:
   upstream_commit: 3c2629142c5d437428269b1b722b08c0b87f574d
   vendored_at: "2026-09-06"
   vendored_by: t4ku
-  provenance: verbatim
+  provenance: adapted
 ---
 
 Help the user understand the current topic of conversation visually. Skip the preamble and keep prose brief. Pick the smallest view that makes the key point clear.
+
+Pick the format for where the user is reading. In a terminal, text views (pseudocode, call trees, file trees, diffs) render everywhere and are the default. Mermaid and HTML need a surface that renders them — an artifact, a PR/issue body, or an IDE markdown preview.
 
 - Show logic or an algorithm as pseudocode:
 
@@ -51,7 +62,7 @@ src/
 └── transport/      # sends API requests
 ```
 
-- Show component interaction, control flow, or data flow with Mermaid:
+- Show component interaction, control flow, or data flow with Mermaid — in an artifact, a PR/issue body, or an IDE preview. A plain terminal does not render it, so there reach for a call tree or a file tree instead:
 
 ```mermaid
 sequenceDiagram
@@ -122,7 +133,10 @@ function expandSkill(command: string): string {
 }
 ```
 
-- For a visual UI, layout, state comparison, or concept too dense for Mermaid, write one focused HTML file — a diagram, an infographic, or a short slide deck, whichever fits the point. Match the product's colors, type, spacing, and components; use real labels and data; support desktop and mobile. Then open it for the user:
+- For a visual UI, layout, state comparison, or concept too dense for Mermaid, write one focused HTML file — a diagram, an infographic, or a short slide deck, whichever fits the point. Match the product's colors, type, spacing, and components; use real labels and data; support desktop and mobile. Write it to the session scratchpad, then hand it over the way the user can actually open it:
+
+  - publish it with the Artifact tool and give them the link — this also reaches them when they are following the session from another device, or
+  - open it locally when a link is overkill:
 
 ```
 Bash(open path/to/show-me-{description}.html)
@@ -138,4 +152,9 @@ You may use one of these, you may use several, it is unlikely you will use all o
 
 Vendored from [`humanlayer/skills`](https://github.com/humanlayer/skills/tree/3c2629142c5d437428269b1b722b08c0b87f574d/plugins/show-me/skills/show-me) by @humanlayer — MIT.
 Pinned to commit `3c26291`, imported 2026-09-06.
-Provenance: verbatim.
+Provenance: adapted — 取り込み後の変更:
+
+- `description` に発火トリガー（英語 + 日本語）を追加
+- 「読む場所（ターミナル / アーティファクト）に合わせて形式を選ぶ」方針を冒頭に追加
+- Mermaid はターミナルでは描画されない旨を注記
+- HTML は scratchpad に書いて Artifact で publish（`open` はローカル確認用のフォールバック）
