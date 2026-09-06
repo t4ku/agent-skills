@@ -1,0 +1,5 @@
+{
+  "name": "youtube-slide-maker",
+  "version": "0.1.0",
+  "description": "YouTube 動画から Marp スライド or 切り抜き動画を生成する（字幕ベースのキーフレーム選定 + ffmpeg 抽出）。"
+}

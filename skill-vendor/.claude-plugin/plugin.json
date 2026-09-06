@@ -1,0 +1,5 @@
+{
+  "name": "skill-vendor",
+  "version": "0.1.0",
+  "description": "Vendor an external Claude Code skill into your own repo with license compliance and full provenance/attribution."
+}

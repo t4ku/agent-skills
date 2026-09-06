@@ -1,0 +1,5 @@
+{
+  "name": "airbnb-adr-simulator",
+  "version": "0.1.0",
+  "description": "Fetch Airbnb income estimates (ADR, occupancy, monthly revenue) for an area via the official Airbnb GraphQL API."
+}
