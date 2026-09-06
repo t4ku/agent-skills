@@ -48,6 +48,10 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dlon/2)**2
     return R * 2 * math.asin(math.sqrt(a))
 
+def parse_numeric_text(value: str) -> int:
+    digits = "".join(filter(str.isdigit, value))
+    return int(digits) if digits else 0
+
 # ─── Airbnb GraphQL ──────────────────────────────────────
 def fetch_estimate(search_query: str, room_type: str, bedroom: int = 1, person_capacity: int = 4) -> dict:
     """
@@ -87,6 +91,10 @@ def fetch_estimate(search_query: str, room_type: str, bedroom: int = 1, person_c
         )
     finally:
         tmp.unlink(missing_ok=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"Airbnb request failed: {r.stderr.strip() or f'curl exit {r.returncode}'}")
+    if not r.stdout.strip():
+        raise RuntimeError("Airbnb request failed: empty response body")
     return json.loads(r.stdout)
 
 def parse_estimate(data: dict) -> dict:
@@ -100,10 +108,10 @@ def parse_estimate(data: dict) -> dict:
     markers = screen.get("mapMarkers", [])
     loc     = screen["locationDetails"]["fullAddress"]
 
-    per_night  = int("".join(filter(str.isdigit, secs[1]["value"])))
-    avg_nights = int(secs[2]["value"])
+    per_night  = parse_numeric_text(secs[1]["value"])
+    avg_nights = parse_numeric_text(secs[2]["value"])
     idx        = max(0, min(avg_nights - 1, len(elist) - 1))
-    monthly    = int("".join(filter(str.isdigit, elist[idx])))
+    monthly    = parse_numeric_text(elist[idx])
 
     coords = [m["coordinate"] for m in markers if m.get("coordinate")]
 
