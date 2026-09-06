@@ -34,7 +34,7 @@ curl -s "https://www.airbnb.jp/host/homes" \
 
 同様に persisted query hash も DevTools で取得:
 - Request Payload → `extensions.persistedQuery.sha256Hash` の値をコピー
-- `scripts/airbnb_adr.py` の `GQL_HASH` に設定する
+- `export AIRBNB_GQL_HASH="<your_hash>"` で環境変数に設定する
 
 > ⚠️ キーとハッシュはローテーションされることがあるので、動かなくなったら再取得する。
 
@@ -87,8 +87,8 @@ Nominatim で駅座標を取得し、API が返すリスト物件の重心との
 - **location 入力が超敏感**: `"すすきの, 札幌市"` と `"札幌市 すすきの"` は別エリアに解釈される。駅名単体（`"すすきの駅"`）が最も精度が高い
 - **Nominatim レートリミット**: 連続呼び出しは 1 秒以上間隔を空ける
 - **稼働日数は `sections[2].value`**: API レスポンスの `header.sections[2]` がエリア実績の平均稼働泊数（自前で仮定しない）
-- **月収は `earningsEstimateListNative[avg_nights - 1]`**: スライダーのインデックスと対応
+- **月収は `earningsEstimateListNative[max(0, avg_nights - 1)]`**: スライダーのインデックスと対応（`avg_nights == 0` は先頭要素に丸める）
 
 ## Script
 
-`scripts/airbnb_adr.py` — スタンドアロンで動く CLI スクリプト。`GQL_HASH` は取得後に設定が必要。
+`scripts/airbnb_adr.py` — スタンドアロンで動く CLI スクリプト。`AIRBNB_GQL_HASH` は取得後に環境変数で設定が必要。

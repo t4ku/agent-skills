@@ -14,9 +14,9 @@ Requires:
     - No external Python deps (stdlib only)
 """
 
-import sys, os, json, math, time, subprocess
+import sys, os, json, math, time, subprocess, tempfile
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 # ─── Config ─────────────────────────────────────────────
 API_KEY  = os.environ.get("AIRBNB_API_KEY", "")
@@ -28,12 +28,20 @@ ENDPOINT = "https://www.airbnb.jp/api/v3/GetHostEstimateData?operationName=GetHo
 # ─── Geocoding (Nominatim) ───────────────────────────────
 def geocode(query: str):
     """Returns (lat, lon, display_name) or (None, None, '')."""
+    params = urlencode({
+        "q": query,
+        "format": "json",
+        "limit": 1,
+        "accept-language": "ja",
+    })
     r = subprocess.run(
-        ["curl", "-s",
-         f"https://nominatim.openstreetmap.org/search?q={quote(query)}&format=json&limit=1&accept-language=ja",
+        ["curl", "-s", "--fail-with-body",
+         f"https://nominatim.openstreetmap.org/search?{params}",
          "-H", "User-Agent: airbnb-adr-simulator/1.0"],
         capture_output=True, text=True, timeout=10
     )
+    if r.returncode != 0:
+        raise RuntimeError(f"Geocode request failed: {r.stderr.strip() or f'curl exit {r.returncode}'}")
     try:
         data = json.loads(r.stdout)
         if data:
@@ -47,6 +55,27 @@ def haversine_km(lat1, lon1, lat2, lon2):
     dlat, dlon = math.radians(lat2-lat1), math.radians(lon2-lon1)
     a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dlon/2)**2
     return R * 2 * math.asin(math.sqrt(a))
+
+def parse_numeric_text(value: str) -> float:
+    filtered = "".join(ch for ch in value if ch.isdigit() or ch in ".,")
+    if not filtered:
+        return 0.0
+
+    last_dot = filtered.rfind(".")
+    last_comma = filtered.rfind(",")
+    decimal_pos = max(last_dot, last_comma)
+    if decimal_pos == -1:
+        return float(filtered)
+
+    digits_after = len(filtered) - decimal_pos - 1
+    separator_count = filtered.count(".") + filtered.count(",")
+    if separator_count == 1 and digits_after == 3:
+        return float(filtered[:decimal_pos] + filtered[decimal_pos + 1:])
+
+    integer_part = "".join(ch for ch in filtered[:decimal_pos] if ch.isdigit())
+    fractional_part = "".join(ch for ch in filtered[decimal_pos + 1:] if ch.isdigit())
+    normalized = integer_part if not fractional_part else f"{integer_part}.{fractional_part}"
+    return float(normalized)
 
 # ─── Airbnb GraphQL ──────────────────────────────────────
 def fetch_estimate(search_query: str, room_type: str, bedroom: int = 1, person_capacity: int = 4) -> dict:
@@ -70,19 +99,27 @@ def fetch_estimate(search_query: str, room_type: str, bedroom: int = 1, person_c
             "persistedQuery": {"version": 1, "sha256Hash": GQL_HASH}
         },
     }
-    tmp = Path("/tmp/_airbnb_payload.json")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False))
+    with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="airbnb_payload_", dir="/tmp", delete=False) as f:
+        tmp = Path(f.name)
+        f.write(json.dumps(payload, ensure_ascii=False))
 
-    r = subprocess.run(
-        ["curl", "-s", "-X", "POST", ENDPOINT,
-         "-H", "Content-Type: application/json",
-         "-H", f"X-Airbnb-API-Key: {API_KEY}",
-         "-H", "User-Agent: Mozilla/5.0",
-         "-H", "Origin: https://www.airbnb.jp",
-         "-H", "Referer: https://www.airbnb.jp/host/homes",
-         "-d", f"@{tmp}"],
-        capture_output=True, text=True, timeout=15
-    )
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "--fail-with-body", "-X", "POST", ENDPOINT,
+             "-H", "Content-Type: application/json",
+             "-H", f"X-Airbnb-API-Key: {API_KEY}",
+             "-H", "User-Agent: Mozilla/5.0",
+             "-H", "Origin: https://www.airbnb.jp",
+             "-H", "Referer: https://www.airbnb.jp/host/homes",
+             "-d", f"@{tmp}"],
+            capture_output=True, text=True, timeout=15
+        )
+    finally:
+        tmp.unlink(missing_ok=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"Airbnb request failed: {r.stderr.strip() or f'curl exit {r.returncode}'}")
+    if not r.stdout.strip():
+        raise RuntimeError("Airbnb request failed: empty response body")
     return json.loads(r.stdout)
 
 def parse_estimate(data: dict) -> dict:
@@ -96,10 +133,10 @@ def parse_estimate(data: dict) -> dict:
     markers = screen.get("mapMarkers", [])
     loc     = screen["locationDetails"]["fullAddress"]
 
-    per_night  = int("".join(filter(str.isdigit, secs[1]["value"])))
-    avg_nights = int(secs[2]["value"])
-    idx        = min(avg_nights - 1, len(elist) - 1)
-    monthly    = int("".join(filter(str.isdigit, elist[idx])))
+    per_night  = int(round(parse_numeric_text(secs[1]["value"])))
+    avg_nights = int(round(parse_numeric_text(secs[2]["value"])))
+    idx        = max(0, min(avg_nights - 1, len(elist) - 1))
+    monthly    = int(round(parse_numeric_text(elist[idx])))
 
     coords = [m["coordinate"] for m in markers if m.get("coordinate")]
 
@@ -134,7 +171,11 @@ def get_adr(area: str) -> dict:
 
     # Geocode
     time.sleep(1.1)  # Nominatim rate limit
-    lat, lon, display = geocode(area)
+    try:
+        lat, lon, display = geocode(area)
+    except Exception as e:
+        result["error"] = str(e)
+        return result
     if lat is None:
         result["error"] = f"Geocode failed for: {area}"
         return result

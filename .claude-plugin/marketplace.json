@@ -29,6 +29,11 @@
       "name": "show-me",
       "source": "./show-me",
       "description": "Explain the current topic visually — pseudocode, call trees, component/file trees, Mermaid diagrams, diffs, or a focused HTML artifact. Use when the user asks to show/diagram/visualize/illustrate what's going on, 図で見せて / 図解して. Vendored from humanlayer/skills (MIT)."
+    },
+    {
+      "name": "skill-vendor",
+      "source": "./skill-vendor",
+      "description": "Vendor (copy-import) a single external Claude Code skill into your own skills repo with license compliance and full provenance/attribution. Deterministic idempotent primitive: fetch by ref, gate on license, copy, inject provenance frontmatter, ship LICENSE, add Credits, record ledger. Use when asked to vendor/import/clone/borrow a skill with attribution, or スキルを取り込む/vendoring."
     }
   ]
 }
