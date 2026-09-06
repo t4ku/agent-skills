@@ -28,6 +28,7 @@ claude-code-skills/
 | Skill | Description |
 |-------|-------------|
 | `add-github-permalinks` | Add permanent GitHub URLs to documentation |
+| `show-me` | Explain the current topic visually (pseudocode / call tree / Mermaid / diff / HTML artifact) — vendored from humanlayer/skills, MIT |
 
 ---
 
