@@ -14,7 +14,7 @@ Requires:
     - No external Python deps (stdlib only)
 """
 
-import sys, os, json, math, time, subprocess
+import sys, os, json, math, time, subprocess, tempfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -70,19 +70,23 @@ def fetch_estimate(search_query: str, room_type: str, bedroom: int = 1, person_c
             "persistedQuery": {"version": 1, "sha256Hash": GQL_HASH}
         },
     }
-    tmp = Path("/tmp/_airbnb_payload.json")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False))
+    with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="airbnb_payload_", dir="/tmp", delete=False) as f:
+        tmp = Path(f.name)
+        f.write(json.dumps(payload, ensure_ascii=False))
 
-    r = subprocess.run(
-        ["curl", "-s", "-X", "POST", ENDPOINT,
-         "-H", "Content-Type: application/json",
-         "-H", f"X-Airbnb-API-Key: {API_KEY}",
-         "-H", "User-Agent: Mozilla/5.0",
-         "-H", "Origin: https://www.airbnb.jp",
-         "-H", "Referer: https://www.airbnb.jp/host/homes",
-         "-d", f"@{tmp}"],
-        capture_output=True, text=True, timeout=15
-    )
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "-X", "POST", ENDPOINT,
+             "-H", "Content-Type: application/json",
+             "-H", f"X-Airbnb-API-Key: {API_KEY}",
+             "-H", "User-Agent: Mozilla/5.0",
+             "-H", "Origin: https://www.airbnb.jp",
+             "-H", "Referer: https://www.airbnb.jp/host/homes",
+             "-d", f"@{tmp}"],
+            capture_output=True, text=True, timeout=15
+        )
+    finally:
+        tmp.unlink(missing_ok=True)
     return json.loads(r.stdout)
 
 def parse_estimate(data: dict) -> dict:
@@ -98,7 +102,7 @@ def parse_estimate(data: dict) -> dict:
 
     per_night  = int("".join(filter(str.isdigit, secs[1]["value"])))
     avg_nights = int(secs[2]["value"])
-    idx        = min(avg_nights - 1, len(elist) - 1)
+    idx        = max(0, min(avg_nights - 1, len(elist) - 1))
     monthly    = int("".join(filter(str.isdigit, elist[idx])))
 
     coords = [m["coordinate"] for m in markers if m.get("coordinate")]

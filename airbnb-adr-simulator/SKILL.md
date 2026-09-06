@@ -34,7 +34,7 @@ curl -s "https://www.airbnb.jp/host/homes" \
 
 同様に persisted query hash も DevTools で取得:
 - Request Payload → `extensions.persistedQuery.sha256Hash` の値をコピー
-- `scripts/airbnb_adr.py` の `GQL_HASH` に設定する
+- `export AIRBNB_GQL_HASH="<your_hash>"` で環境変数に設定する
 
 > ⚠️ キーとハッシュはローテーションされることがあるので、動かなくなったら再取得する。
 
@@ -91,4 +91,4 @@ Nominatim で駅座標を取得し、API が返すリスト物件の重心との
 
 ## Script
 
-`scripts/airbnb_adr.py` — スタンドアロンで動く CLI スクリプト。`GQL_HASH` は取得後に設定が必要。
+`scripts/airbnb_adr.py` — スタンドアロンで動く CLI スクリプト。`AIRBNB_GQL_HASH` は取得後に環境変数で設定が必要。
