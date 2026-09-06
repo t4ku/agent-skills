@@ -5,19 +5,26 @@ Public skill collection for Claude Code.
 ## Structure
 
 ```
-claude-code-skills/
+agent-skills/
 ├── .claude-plugin/
-│   └── marketplace.json
-├── {skill-name}/
-│   └── SKILL.md
+│   └── marketplace.json          # 各プラグインを登録
+├── {plugin-name}/                # 1 プラグイン = 1 スキル
+│   ├── .claude-plugin/
+│   │   └── plugin.json           # name / version / description
+│   └── skills/{skill-name}/
+│       └── SKILL.md              # 参照ファイル・LICENSE は同ディレクトリに置く
+├── CREDITS.md                    # vendored skill の台帳
 └── README.md
 ```
+
+> スキルは `{plugin}/skills/{skill}/SKILL.md` に置くこと。プラグイン直下の `SKILL.md` は
+> Claude Code に読み込まれない（`claude --plugin-dir ./<plugin> plugin details <name>` で確認できる）。
 
 ## Installation (Public → Marketplace)
 
 ```bash
 # Add marketplace
-/plugin marketplace add t4ku/claude-code-skills
+/plugin marketplace add t4ku/agent-skills
 
 # Install skill
 /plugin install add-github-permalinks

@@ -1,0 +1,5 @@
+{
+  "name": "loop-design",
+  "version": "0.1.0",
+  "description": "B 型 loop engineering の 7 要素を埋めた loop spec を生成する（Workflow / /loop / claude -p に落とせる骨格 + failure mode 対策）。"
+}
