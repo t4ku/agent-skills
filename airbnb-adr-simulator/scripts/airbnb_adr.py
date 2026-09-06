@@ -16,7 +16,7 @@ Requires:
 
 import sys, os, json, math, time, subprocess, tempfile
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 # ─── Config ─────────────────────────────────────────────
 API_KEY  = os.environ.get("AIRBNB_API_KEY", "")
@@ -28,9 +28,15 @@ ENDPOINT = "https://www.airbnb.jp/api/v3/GetHostEstimateData?operationName=GetHo
 # ─── Geocoding (Nominatim) ───────────────────────────────
 def geocode(query: str):
     """Returns (lat, lon, display_name) or (None, None, '')."""
+    params = urlencode({
+        "q": query,
+        "format": "json",
+        "limit": 1,
+        "accept-language": "ja",
+    })
     r = subprocess.run(
         ["curl", "-s", "--fail-with-body",
-         f"https://nominatim.openstreetmap.org/search?q={quote(query)}&format=json&limit=1&accept-language=ja",
+         f"https://nominatim.openstreetmap.org/search?{params}",
          "-H", "User-Agent: airbnb-adr-simulator/1.0"],
         capture_output=True, text=True, timeout=10
     )
@@ -50,9 +56,26 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dlon/2)**2
     return R * 2 * math.asin(math.sqrt(a))
 
-def parse_numeric_text(value: str) -> int:
-    digits = "".join(filter(str.isdigit, value))
-    return int(digits) if digits else 0
+def parse_numeric_text(value: str) -> float:
+    filtered = "".join(ch for ch in value if ch.isdigit() or ch in ".,")
+    if not filtered:
+        return 0.0
+
+    last_dot = filtered.rfind(".")
+    last_comma = filtered.rfind(",")
+    decimal_pos = max(last_dot, last_comma)
+    if decimal_pos == -1:
+        return float(filtered)
+
+    digits_after = len(filtered) - decimal_pos - 1
+    separator_count = filtered.count(".") + filtered.count(",")
+    if separator_count == 1 and digits_after == 3:
+        return float(filtered[:decimal_pos] + filtered[decimal_pos + 1:])
+
+    integer_part = "".join(ch for ch in filtered[:decimal_pos] if ch.isdigit())
+    fractional_part = "".join(ch for ch in filtered[decimal_pos + 1:] if ch.isdigit())
+    normalized = integer_part if not fractional_part else f"{integer_part}.{fractional_part}"
+    return float(normalized)
 
 # ─── Airbnb GraphQL ──────────────────────────────────────
 def fetch_estimate(search_query: str, room_type: str, bedroom: int = 1, person_capacity: int = 4) -> dict:
@@ -110,10 +133,10 @@ def parse_estimate(data: dict) -> dict:
     markers = screen.get("mapMarkers", [])
     loc     = screen["locationDetails"]["fullAddress"]
 
-    per_night  = parse_numeric_text(secs[1]["value"])
-    avg_nights = parse_numeric_text(secs[2]["value"])
+    per_night  = int(round(parse_numeric_text(secs[1]["value"])))
+    avg_nights = int(round(parse_numeric_text(secs[2]["value"])))
     idx        = max(0, min(avg_nights - 1, len(elist) - 1))
-    monthly    = parse_numeric_text(elist[idx])
+    monthly    = int(round(parse_numeric_text(elist[idx])))
 
     coords = [m["coordinate"] for m in markers if m.get("coordinate")]
 
