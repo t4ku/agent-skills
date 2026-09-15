@@ -9,10 +9,11 @@
       "name": "engineering",
       "source": "./",
       "strict": false,
-      "description": "開発作業そのものを助けるスキル。コードを指すドキュメントに GitHub permalink を貼る、いま話している構造やフローを図で見せる。",
+      "description": "開発作業そのものを助けるスキル。実装前に隔離されたワークスペース (worktree) を用意する、コードを指すドキュメントに GitHub permalink を貼る、いま話している構造やフローを図で見せる。",
       "skills": [
         "./skills/add-github-permalinks",
-        "./skills/show-me"
+        "./skills/show-me",
+        "./skills/using-git-worktrees"
       ]
     },
     {
