@@ -1,0 +1,6 @@
+[
+  {"number": 11, "title": "Bump the linter", "html_url": "https://github.com/example/app/pull/11", "assignees": [], "pull_request": {"url": "https://api.github.com/repos/example/app/pulls/11"}, "issue_dependencies_summary": {"blocked_by": 0, "blocking": 0}},
+  {"number": 9, "title": "Already claimed work", "html_url": "https://github.com/example/app/issues/9", "assignees": [{"login": "someone"}], "issue_dependencies_summary": {"blocked_by": 0, "blocking": 0}},
+  {"number": 8, "title": "Blocked follow-up", "html_url": "https://github.com/example/app/issues/8", "assignees": [], "issue_dependencies_summary": {"blocked_by": 1, "blocking": 0}},
+  {"number": 7, "title": "Add login page", "html_url": "https://github.com/example/app/issues/7", "assignees": [], "issue_dependencies_summary": {"blocked_by": 0, "blocking": 1}}
+]

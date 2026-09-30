@@ -1,0 +1,19 @@
+{"ok": true, "result": {
+  "dispatch": {"id": "ctx_test1", "runId": "run_test1", "taskId": "task_test1", "status": "dispatched"},
+  "worker": {
+    "dispatchId": "ctx_test1",
+    "state": "ready",
+    "stage": "input_accepted",
+    "worktreeId": "repo-app-id::/path/to/worktrees/issue-7-add-login-page",
+    "agentTerminalHandle": "term_test1",
+    "effects": [
+      {"kind": "worktree", "action": "created_top_level", "id": "repo-app-id::/path/to/worktrees/issue-7-add-login-page"},
+      {"kind": "terminal", "role": "agent", "action": "created", "id": "term_test1"}
+    ],
+    "residualResources": [
+      {"kind": "worktree", "action": "created_top_level", "id": "repo-app-id::/path/to/worktrees/issue-7-add-login-page"},
+      {"kind": "terminal", "role": "agent", "action": "created", "id": "term_test1"}
+    ],
+    "startOptions": {"worktree": "new-top-level", "name": "issue-7-add-login-page", "repo": "id:repo-app-id", "baseBranch": "main"}
+  }
+}}

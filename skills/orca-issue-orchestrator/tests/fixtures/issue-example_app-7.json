@@ -1,0 +1,9 @@
+{
+  "number": 7,
+  "title": "Add login page",
+  "state": "OPEN",
+  "url": "https://github.com/example/app/issues/7",
+  "assignees": [],
+  "body": "## What to build\n\nA login page at `/login` that posts to the \"session\" endpoint.\nKeep $HOME and 'quotes' and \\backslashes\\ exactly as written.\n\n## Acceptance criteria\n\n- [ ] The form submits",
+  "comments": []
+}

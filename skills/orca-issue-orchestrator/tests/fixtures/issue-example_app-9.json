@@ -1,0 +1,9 @@
+{
+  "number": 9,
+  "title": "Already claimed work",
+  "state": "OPEN",
+  "url": "https://github.com/example/app/issues/9",
+  "assignees": [{"login": "someone"}],
+  "body": "Claimed elsewhere.",
+  "comments": []
+}
