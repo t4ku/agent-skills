@@ -37,6 +37,8 @@ Two procedures carry the detail. Read the one you need before acting.
 | **Guard** | `references/guard.md` | What the hook allows and denies in the Hub folder, the `permissions.deny` safety net, the Codex read-only sandbox, and how to read a denial |
 | **Issue sync** | `references/issue-sync.md` | Claim, Frontier, Spec template, dispatch, Mapping comment, success / failure closeout, recovery after an Orca restart |
 
+The Hub folder config `.orca-hub/hub.json` and exactly what `scripts/guard.sh` allows and denies: `references/hub-json.md`.
+
 ## Orchestrator commands
 
 All scripts print what they would do by default and act only with `--apply`. Preview first, then apply.
@@ -47,14 +49,14 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 | `scripts/frontier` | List open, unblocked, unassigned `ready-for-agent` Issues across the configured repos |
 | `scripts/issue-dispatch` | Claim an Issue, create the Task, start the Worker, link the worktree, post the Mapping comment |
 | `scripts/issue-closeout` | Post the success or failure comment, adjust assignee / labels on failure, release the Worker |
-| `scripts/guard.sh` | The PreToolUse hook; `init-hub` copies it into `.orca-hub/` |
+| `scripts/guard.sh` | The PreToolUse hook; `init-hub` copies it into `.orca-hub/`. Hook-contract tests: `tests/guard.test.sh` |
 
 ## Initialise a Hub folder
 
 1. The Hub folder must already be an Orca folder workspace. If it is not, `init-hub` prints the `orca project setup-existing-folder --kind folder` command and stops.
 2. Preview: `scripts/init-hub <hub-dir>`. Read the plan — it lists every file it will write and every file it will back up.
 3. Apply: `scripts/init-hub <hub-dir> --apply`. Existing files are backed up with a timestamp; `.claude/settings.json` is merged, not replaced.
-4. Edit `<hub-dir>/.orca-hub/hub.json`: `hub_id`, `concurrency` (default 1), `repos[]` as `<owner>/<repo>` with optional `base_branch` and `constraints[]`.
+4. Edit `<hub-dir>/.orca-hub/hub.json`: `hub_id`, `concurrency` (default 1), `repos[]` as `<owner>/<repo>` with optional `base_branch` and `constraints[]`, and `bash_allow[]`. Schema: `references/hub-json.md`.
 5. For Codex, start the Orchestrator with the launch command `init-hub` prints.
 
 Nothing under `~/.claude`, `~/.codex`, or `~/.orca` is touched.
