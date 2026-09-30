@@ -4,6 +4,7 @@
     "name": "t4ku",
     "url": "https://github.com/t4ku"
   },
+  "description": "Claude Code skills grouped by category: engineering, agent-lab, presentation, integrations.",
   "plugins": [
     {
       "name": "engineering",
@@ -20,9 +21,10 @@
       "name": "agent-lab",
       "source": "./",
       "strict": false,
-      "description": "エージェントとスキルを作る側のスキル。外部スキルをライセンス・provenance 付きで取り込む、自走ループの spec を 7 要素で書く。",
+      "description": "エージェントとスキルを作る側のスキル。外部スキルをライセンス・provenance 付きで取り込む、自走ループの spec を 7 要素で書く、GitHub Issues を Orca Worker に委譲して進める Orchestrator を動かす。",
       "skills": [
         "./skills/loop-design",
+        "./skills/orca-issue-orchestrator",
         "./skills/skill-vendor"
       ]
     },
