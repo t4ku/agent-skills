@@ -54,10 +54,10 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 ## Initialise a Hub folder
 
 1. The Hub folder must already be an Orca folder workspace. If it is not, `init-hub` prints the `orca project setup-existing-folder --kind folder` command and stops.
-2. Preview: `scripts/init-hub <hub-dir>`. Read the plan — it lists every file it will write and every file it will back up.
-3. Apply: `scripts/init-hub <hub-dir> --apply`. Existing files are backed up with a timestamp; `.claude/settings.json` is merged, not replaced.
-4. Edit `<hub-dir>/.orca-hub/hub.json`: `hub_id`, `concurrency` (default 1), `repos[]` as `<owner>/<repo>` with optional `base_branch` and `constraints[]`, and `bash_allow[]`. Schema: `references/hub-json.md`.
-5. For Codex, start the Orchestrator with the launch command `init-hub` prints.
+2. Preview: `scripts/init-hub.sh <hub-dir>` (optionally `--hub-id <id> --repo <owner>/<repo> --concurrency <n> --bash-allow <cmd>`). Read the plan — it lists every file it will write and every file it will back up.
+3. Apply: the same command with `--apply`. Replaced files are backed up with a timestamp; `.claude/settings.json` and `hub.json` are merged, not replaced. A second run reports "No changes."
+4. Edit `<hub-dir>/.orca-hub/hub.json`: `hub_id`, `concurrency` (default 1), `repos[]` as `<owner>/<repo>` with optional `base_branch` and `constraints[]`, and `bash_allow[]`. Schema: `references/hub-json.md`. After changing `bash_allow[]`, re-run step 3 so the Codex rules follow.
+5. For Codex, start the Orchestrator with the launch command `init-hub` prints and check `/status` (see `references/guard.md`).
 
 Nothing under `~/.claude`, `~/.codex`, or `~/.orca` is touched.
 
