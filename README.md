@@ -33,7 +33,7 @@ agent-skills/
 | Plugin | Skills | 何のためのカテゴリか |
 |--------|--------|----------------------|
 | `engineering` | `add-github-permalinks` / `show-me` / `using-git-worktrees` | 開発作業そのものを助ける |
-| `agent-lab` | `loop-design` / `skill-vendor` | エージェント・スキルを作る側 |
+| `agent-lab` | `loop-design` / `orca-issue-orchestrator` / `skill-vendor` | エージェント・スキルを作る側 |
 | `presentation` | `speech-slides` / `youtube-slide-maker` | 人に見せる資料を作る |
 | `integrations` | `airbnb-adr-simulator` | 外部サービスの API を叩く / 操作する |
 
@@ -45,6 +45,7 @@ agent-skills/
 | `show-me` | engineering | Explain the current topic visually (pseudocode / call tree / Mermaid / diff / HTML artifact) — vendored from humanlayer/skills, MIT |
 | `using-git-worktrees` | engineering | Set up an isolated workspace before implementation — native worktree tools first, `git worktree` fallback — vendored from obra/superpowers, MIT |
 | `loop-design` | agent-lab | Fill a B-type loop-engineering spec (7 elements) as copy-pasteable output |
+| `orca-issue-orchestrator` | agent-lab | Drive GitHub Issues through Orca Workers from a Hub folder session that never edits code |
 | `skill-vendor` | agent-lab | Vendor an external skill into your repo with license + provenance/attribution |
 | `speech-slides` | presentation | Generate PPTX decks for 5-min Monday morning speeches |
 | `youtube-slide-maker` | presentation | Build Marp slides / clip videos from a YouTube video |
