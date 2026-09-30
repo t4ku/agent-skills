@@ -102,7 +102,13 @@ in_list() {
   return 1
 }
 
-extra_allow="$(jq -r '.bash_allow[]? // empty' "$config" 2>/dev/null | tr '\n' ' ')"
+# in_bash_allow <word>: true when <word> equals a bash_allow[] element of
+# hub.json. Elements are compared as whole JSON strings inside jq, never
+# word-split, so one containing whitespace matches nothing. A bash_allow that
+# is not an array allows nothing.
+in_bash_allow() {
+  jq -e --arg w "$1" 'any(.bash_allow | arrays | .[]; . == $w)' "$config" >/dev/null 2>&1
+}
 
 # check_segment <segment>: deny unless the segment may run.
 check_segment() {
@@ -117,7 +123,7 @@ check_segment() {
     deny "git${second:+ $second}"
   fi
   in_list "$first" "$ALLOWED_COMMANDS" && return 0
-  in_list "$first" "$extra_allow" && return 0
+  in_bash_allow "$first" && return 0
   case "$(basename -- "$first")" in
     issue-*.sh|frontier.sh) return 0 ;;
   esac

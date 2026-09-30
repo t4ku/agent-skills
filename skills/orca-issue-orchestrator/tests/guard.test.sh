@@ -175,6 +175,28 @@ expect_deny "Bash: segment with >>" "$(bash_json 'ls && cat a >> b')" '>'
 expect_deny "Bash: env assignment prefix" "$(bash_json 'FOO=1 gh issue list')" 'FOO=1'
 expect_deny "Bash: skill scripts are matched by exact basename pattern" "$(bash_json './myissue-x.sh')" './myissue-x.sh'
 
+# --- bash_allow[] matches whole elements -----------------------------------------
+
+# set_bash_allow <JSON value>: rewrite bash_allow in the Hub folder hub.json.
+set_bash_allow() {
+  local config="$HUB/.orca-hub/hub.json"
+  jq --argjson a "$1" '.bash_allow = $a' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+}
+
+set_bash_allow '["make npm"]'
+expect_deny "bash_allow: an element with a space does not allow its first word" "$(bash_json 'make x')" make
+expect_deny "bash_allow: an element with a space does not allow its second word" "$(bash_json 'npm x')" npm
+set_bash_allow '[" make", "make ", "\tmake"]'
+expect_deny "bash_allow: elements with leading/trailing whitespace do not match" "$(bash_json 'make x')" make
+set_bash_allow '["x\nmake"]'
+expect_deny "bash_allow: an element with a newline does not match either line" "$(bash_json 'make x')" make
+set_bash_allow '"make"'
+expect_deny "bash_allow: a non-array value allows nothing" "$(bash_json 'make x')" make
+set_bash_allow '{"x": "make"}'
+expect_deny "bash_allow: an object's values are not elements" "$(bash_json 'make x')" make
+set_bash_allow '["make"]'
+expect_allow "bash_allow: an exact element allows the command" "$(bash_json 'make x')"
+
 # --- malformed input in the Hub folder ------------------------------------------------
 
 expect_deny "malformed stdin in the Hub folder is denied" 'not json'
