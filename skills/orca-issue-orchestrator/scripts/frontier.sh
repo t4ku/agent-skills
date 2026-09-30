@@ -16,19 +16,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
 
-hub_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+hub_arg="${CLAUDE_PROJECT_DIR:-$PWD}"
 as_json=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --hub) [ $# -ge 2 ] || die "--hub needs a directory"; hub_dir="$2"; shift 2 ;;
+    --hub) [ $# -ge 2 ] || die "--hub needs a directory"; hub_arg="$2"; shift 2 ;;
     --json) as_json=1; shift ;;
     -h | --help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
-hub_load "$hub_dir"
+hub_load "$hub_arg"
 
 all='[]'
 while IFS= read -r repo; do

@@ -31,7 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 WORKER_TIMEOUT_MS=300000
 
-hub_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+hub_arg="${CLAUDE_PROJECT_DIR:-$PWD}"
 force=0
 receipt=""
 positional=()
@@ -40,7 +40,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1; shift ;;
     --force) force=1; shift ;;
-    --hub) [ $# -ge 2 ] || die "--hub needs a directory"; hub_dir="$2"; shift 2 ;;
+    --hub) [ $# -ge 2 ] || die "--hub needs a directory"; hub_arg="$2"; shift 2 ;;
     --receipt) [ $# -ge 2 ] || die "--receipt needs a file or -"; receipt="$2"; shift 2 ;;
     -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option: $1" ;;
@@ -54,7 +54,7 @@ number="${positional[1]}"
 printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || die "repo must be <owner>/<repo>: $repo"
 printf '%s' "$number" | grep -Eq '^[1-9][0-9]*$' || die "Issue number must be a positive integer: $number"
 
-hub_load "$hub_dir"
+hub_load "$hub_arg"
 repo_cfg="$(hub_repo "$repo")"
 [ -n "$repo_cfg" ] || die "$repo is not in $HUB_JSON repos[]; add it there first"
 
@@ -134,8 +134,9 @@ if [ -n "$receipt" ]; then
   [ -n "$worktree_key" ] && [ -n "$branch" ] || die "worktree $worktree_id has no identity key or branch"
 
   body="$(mapping_comment "$run_id" "$task_id" "$dispatch_id" "$worktree_key" "$branch")"
+  hub_path="$(hub_get '.hub_path // empty')"
   case "$body" in
-    *::/* | *"$hub_dir"* | *"${HOME:-/nonexistent-home}"*)
+    *::/* | *"$HUB_DIR"* | *"${hub_path:-$HUB_DIR}"* | *"${HOME:-$HUB_DIR}"*)
       die "refusing to post: the Mapping comment would contain a local path" ;;
   esac
 
@@ -162,7 +163,8 @@ assignees="$(json_get "$issue" '[.assignees[]?.login] | join(", ") | select(leng
 [ -z "$assignees" ] || die "$repo#$number is already claimed by $assignees"
 
 limit="$(hub_concurrency)"
-in_flight="$(gh_in_flight_count)"
+case "$limit" in '' | *[!0-9]*) die "concurrency in hub.json must be a non-negative integer: $limit" ;; esac
+in_flight="$(gh_in_flight_count)" || die "cannot count in-flight Issues (gh issue list failed); nothing was done"
 if [ "$in_flight" -ge "$limit" ]; then
   if [ "$force" -eq 1 ]; then
     note "warning: $in_flight Issue(s) in flight, concurrency $limit; dispatching anyway (--force)"
@@ -214,7 +216,7 @@ printf '# 1. Claim the Issue\n'
 mutate gh issue edit "$number" -R "$repo" --add-assignee @me || die "claim failed; nothing else was done"
 
 printf '\n# 2. Create the Task (Spec below)\n'
-printf '%s --spec <Spec>\n' "$(print_cmd orca orchestration task-create --task-title "$task_title")"
+printf '%s --spec <Spec> --json\n' "$(print_cmd orca orchestration task-create --task-title "$task_title")"
 task_id="<task_id>"
 if [ "$APPLY" -eq 1 ]; then
   created="$(orca orchestration task-create --task-title "$task_title" --spec "$spec" --json)" ||

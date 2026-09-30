@@ -39,7 +39,7 @@ Before any write it checks, and refuses (exit 1) when one fails:
 
 1. `<owner>/<repo>` is in `hub.json` `repos[]`.
 2. The Issue is open and has no assignee.
-3. **Concurrency**: the open Issues assigned to `@me` whose comments hold a Mapping block, summed over every configured repo, are fewer than `concurrency` (default 1). `--force` dispatches anyway.
+3. **Concurrency**: the open Issues assigned to `@me` whose comments hold a Mapping block, summed over every configured repo, are fewer than `concurrency` (default 1). `--force` dispatches anyway. If the count cannot be read, it refuses. An Issue between step 1 and step 2 has no Mapping block yet and is not counted, so finish step 2 before dispatching the next Issue.
 4. An Orca repo matches: `orca repo list --json`, `.result.repos[]` with `.gitRemoteIdentity.canonicalKey == "github.com/<owner>/<repo>"`, used as `id:<repo-id>`.
 5. A Run is bound to this terminal (`orca orchestration run-current --json`). Without one, `--apply` refuses and prints `orca orchestration run-create`. One Run per Orchestrator session.
 

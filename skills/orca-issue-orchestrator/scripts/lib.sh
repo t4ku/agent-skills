@@ -27,10 +27,12 @@ note() { printf '%s\n' "$*" >&2; }
 
 # --- hub.json ---------------------------------------------------------------
 
-# hub_load <hub-dir>: validate <hub-dir>/.orca-hub/hub.json and set HUB_JSON.
+# hub_load <hub-dir>: validate <hub-dir>/.orca-hub/hub.json; set HUB_DIR
+# (absolute, symlinks resolved) and HUB_JSON.
 hub_load() {
-  HUB_JSON="$1/.orca-hub/hub.json"
-  [ -f "$HUB_JSON" ] || die "no hub config at $HUB_JSON (run init-hub, or pass --hub <hub-dir>)"
+  HUB_DIR="$(cd "$1" 2> /dev/null && pwd -P)" || die "no Hub folder at $1"
+  HUB_JSON="$HUB_DIR/.orca-hub/hub.json"
+  [ -f "$HUB_JSON" ] || die "no Hub config at $HUB_JSON (run init-hub, or pass --hub <hub-dir>)"
   jq -e '(.hub_id | type == "string" and length > 0) and (.repos | type == "array")' "$HUB_JSON" > /dev/null 2>&1 ||
     die "$HUB_JSON needs a string hub_id and a repos[] array"
 }
@@ -101,17 +103,19 @@ gh_default_branch() {
 }
 
 # gh_in_flight_count: open Issues assigned to @me that carry the Mapping marker,
-# summed over every repo in hub.json.
+# summed over every repo in hub.json. Prints nothing and returns 1 on failure;
+# callers must treat that as a refusal (it runs in a command substitution).
 gh_in_flight_count() {
-  local repo total=0 n
+  local repo total=0 list n
   while IFS= read -r repo; do
     [ -n "$repo" ] || continue
+    list="$(gh issue list -R "$repo" --assignee @me --state open \
+      --search "$MAPPING_MARKER in:comments" --json number,comments --limit 100)" || return 1
     # The search also hits comments that merely mention the marker; count only
     # Issues with a real Mapping block.
-    n="$(gh issue list -R "$repo" --assignee @me --state open \
-      --search "$MAPPING_MARKER in:comments" --json number,comments --limit 100 |
-      jq --arg m "<!-- $MAPPING_MARKER {" 'map(select(any(.comments[]?; .body | contains($m)))) | length')" ||
-      die "gh issue list failed for $repo"
+    n="$(printf '%s' "$list" |
+      jq --arg m "<!-- $MAPPING_MARKER {" 'map(select(any(.comments[]?; .body | contains($m)))) | length')" || return 1
+    case "$n" in '' | *[!0-9]*) return 1 ;; esac
     total=$((total + n))
   done <<EOF_REPOS
 $(hub_repos)

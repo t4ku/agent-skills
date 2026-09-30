@@ -195,8 +195,11 @@ check "apply: prints the next step that takes the receipt" out_has "--receipt - 
 
 # --- issue-dispatch.sh: refusals ------------------------------------------------
 
+# One open Issue assigned to @me with a Mapping block.
+IN_FLIGHT_ONE='[{"number": 5, "comments": [{"body": "<!-- orca-issue-orchestrator {\"v\":1} -->"}]}]'
+
 reset_fakes
-echo '[{"number": 5, "comments": [{"body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1} -->"}]}]' > "$OVR/inflight-example_api.json"
+printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --apply
 check "concurrency: refuses beyond the limit" code_is 1
 check "concurrency: says why" out_has "concurrency"
@@ -205,7 +208,7 @@ check "concurrency: counts open Issues assigned to @me with the Mapping marker" 
   bash -c 'jq -e "select(.[1]==\"issue\" and .[2]==\"list\") | (index(\"--assignee\") as \$i | .[\$i+1] == \"@me\") and (index(\"--state\") as \$i | .[\$i+1] == \"open\") and (map(select(contains(\"orca-issue-orchestrator\"))) | length > 0)" "$FAKE_LOG" >/dev/null'
 
 reset_fakes
-echo '[{"number": 5, "comments": [{"body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1} -->"}]}]' > "$OVR/inflight-example_api.json"
+printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --apply --force
 check "concurrency: --force dispatches anyway" code_is 0
 check "concurrency: --force still claims first" claim_first
@@ -214,6 +217,19 @@ reset_fakes
 echo '[{"number": 5, "comments": [{"body": "We could use orca-issue-orchestrator here."}]}]' > "$OVR/inflight-example_api.json"
 run "$DISPATCH" example/app 7 --hub "$HUB"
 check "concurrency: a comment that only mentions the marker does not count" code_is 0
+
+reset_fakes
+printf 'not json\n' > "$OVR/inflight-example_api.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply
+check "concurrency: a failed count refuses (fail closed)" code_is 1
+check "concurrency: a failed count claims nothing" no_mutation
+
+reset_fakes
+jq '.concurrency = "two"' "$HUB/.orca-hub/hub.json" > "$WORK/hub.json" && cp "$HUB/.orca-hub/hub.json" "$WORK/hub.json.orig" && mv "$WORK/hub.json" "$HUB/.orca-hub/hub.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply
+mv "$WORK/hub.json.orig" "$HUB/.orca-hub/hub.json"
+check "concurrency: a non-integer limit refuses" code_is 1
+check "concurrency: a non-integer limit claims nothing" no_mutation
 
 reset_fakes
 run "$DISPATCH" example/app 9 --hub "$HUB" --apply
@@ -268,6 +284,10 @@ human_lines() {
     grep -qxF -- '- Run `run_test1` / Task `task_test1` / Dispatch `ctx_test1`' "$FAKE_LOG.comment"
 }
 check "receipt apply: the comment has the human-readable lines" human_lines
+
+reset_fakes
+run "$DISPATCH" example/app 7 --hub . --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a relative --hub still posts the comment" called "gh issue comment 7"
 
 reset_fakes
 jq '.comments = [{"body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
