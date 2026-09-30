@@ -72,8 +72,8 @@ if [ -z "$hub_arg" ]; then
   exit 1
 fi
 case "$concurrency" in
-  ''|[1-9]|[1-9][0-9]) ;;
-  *) die "--concurrency must be a positive integer" ;;
+  '') ;;
+  *[!0-9]*|0*) die "--concurrency must be a positive integer" ;;
 esac
 for r in ${repos[@]+"${repos[@]}"}; do
   case "$r" in
@@ -166,12 +166,17 @@ staged() {
   printf '%s\n' "$STAGE/$1"
 }
 
-# existing_json <relative path>: print the Hub folder's JSON file, or nothing.
+# existing_json <relative path>: print the Hub folder's JSON file, or nothing
+# when it does not exist. Call check_json_object first: a die inside $(...)
+# would only leave the subshell.
 existing_json() {
-  local target="$hub_real/$1"
-  [ -f "$target" ] || return 0
-  jq -e 'type == "object"' "$target" >/dev/null 2>&1 || die "$1 exists but is not a JSON object; fix or move it first"
-  cat "$target"
+  [ ! -f "$hub_real/$1" ] || cat "$hub_real/$1"
+}
+
+# check_json_object <relative path>: die unless the file is missing or a JSON object.
+check_json_object() {
+  [ -f "$hub_real/$1" ] || return 0
+  jq -e 'type == "object"' "$hub_real/$1" >/dev/null 2>&1 || die "$1 exists but is not a JSON object; fix or move it first"
 }
 
 # json_array <values...>: print the values as a JSON array of strings.
@@ -198,6 +203,7 @@ stage AGENTS.md
 # .claude/settings.json: add the Guard hook and the denies; keep everything else.
 guard_path="$hub_path/.orca-hub/guard.sh"
 hook_cmd="'$(printf '%s' "$guard_path" | sed "s/'/'\\\\''/g")'"
+check_json_object .claude/settings.json
 settings_old="$(existing_json .claude/settings.json)"
 empty_object="{}"
 printf "%s" "${settings_old:-$empty_object}" | jq --arg cmd "$hook_cmd" --arg matcher "$HOOK_MATCHER" --argjson deny "$DENY_JSON" '
@@ -239,6 +245,7 @@ stage .codex/config.toml
 
 # .orca-hub/hub.json: arguments over the existing file over the template.
 default_id="$(basename -- "$hub_path" | tr -c 'A-Za-z0-9._\n-' '-')"
+check_json_object .orca-hub/hub.json
 hub_old="$(existing_json .orca-hub/hub.json)"
 printf '%s' "${hub_old:-null}" | jq \
   --arg hub "$hub_path" --arg default_id "$default_id" --arg id "$hub_id" --arg conc "$concurrency" \

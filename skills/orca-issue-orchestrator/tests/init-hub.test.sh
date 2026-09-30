@@ -244,6 +244,20 @@ run_init "$HUB3" --apply
 check "a re-run keeps hand edits to hub.json" jq -e '(.repos | length) == 2 and .hub_id == "example"' "$H3"
 check "a re-run after hand edits reports no changes" contains "$OUT" "No changes"
 
+# --- an existing JSON file that is not an object -------------------------------
+
+HUB5="$(new_hub badjson)"
+mkdir -p "$HUB5/.claude"
+echo "[1]" > "$HUB5/.claude/settings.json"
+before="$(snapshot "$HUB5")"
+run_init "$HUB5" --apply
+check "a settings.json that is not an object stops init-hub" [ "$CODE" -ne 0 ]
+check "a settings.json that is not an object leaves the Hub folder untouched" [ "$(snapshot "$HUB5")" = "$before" ]
+run_init "$HUB5" --apply --concurrency 120
+check "--concurrency 120 passes argument checks" contains "$OUT" "not a JSON object"
+run_init "$HUB5" --concurrency 0
+check "--concurrency 0 is rejected" [ "$CODE" -ne 0 ]
+
 # --- a Hub path with a dot -------------------------------------------------------
 
 HUB4="$(new_hub dotted.hub)"

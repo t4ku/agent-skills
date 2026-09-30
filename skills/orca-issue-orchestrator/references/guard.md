@@ -59,6 +59,8 @@ The Codex path has not been verified on a real machine. After starting it, run `
 
 Without `--sandbox read-only` a folder outside git may be writable, and `AGENTS.md` alone enforces nothing.
 
+Known gap: an `allow` rule runs its whole command outside the sandbox, so options of allowlisted commands can still write (`find -delete`, `git branch -D`, `gh api -X DELETE`). The same options pass the Claude Code Guard; see the known gaps in `references/hub-json.md`.
+
 ## How to read a denial
 
 A hook denial arrives as the tool result:
