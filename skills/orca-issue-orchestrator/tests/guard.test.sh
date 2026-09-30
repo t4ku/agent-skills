@@ -68,7 +68,7 @@ run_guard() {
 }
 
 ok() { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-ng() { fail=$((fail + 1)); printf 'FAIL %s\n     %s\n' "$1" "$2"; }
+fail_case() { fail=$((fail + 1)); printf 'FAIL %s\n     %s\n' "$1" "$2"; }
 
 # expect_allow <name> <stdin JSON> [project dir]
 expect_allow() {
@@ -76,7 +76,7 @@ expect_allow() {
   if [ "$CODE" -eq 0 ] && [ -z "$OUT" ]; then
     ok "$1"
   else
-    ng "$1" "want no output and exit 0, got exit $CODE, stdout: $OUT"
+    fail_case "$1" "want no output and exit 0, got exit $CODE, stdout: $OUT"
   fi
 }
 
@@ -94,17 +94,17 @@ expect_deny() {
   if [ "$CODE" -eq 0 ] && [ "$got" = "$exp" ]; then
     ok "$1"
   else
-    ng "$1" "want exit 0 and $exp, got exit $CODE, stdout: $OUT"
+    fail_case "$1" "want exit 0 and $exp, got exit $CODE, stdout: $OUT"
   fi
 }
 
 # --- session matching -------------------------------------------------------
 
-expect_allow "non-hub project dir: Write outside is not judged" "$(write_json "$OTHER/x.txt")" "$OTHER"
-expect_allow "non-hub project dir: denied Bash is not judged" "$(bash_json 'rm -rf x')" "$OTHER"
+expect_allow "project dir that is not the Hub folder: Write outside is not judged" "$(write_json "$OTHER/x.txt")" "$OTHER"
+expect_allow "project dir that is not the Hub folder: denied Bash is not judged" "$(bash_json 'rm -rf x')" "$OTHER"
 expect_allow "project dir without hub.json is not judged" "$(write_json "$WORK/x.txt")" "$WORK"
 expect_allow "empty CLAUDE_PROJECT_DIR is not judged" "$(write_json "$WORK/x.txt")" ""
-expect_allow "hub path with trailing slash is not an exact match" "$(write_json "$HUB/src/x.txt")" "$HUB/"
+expect_allow "Hub folder path with a trailing slash is not an exact match" "$(write_json "$HUB/src/x.txt")" "$HUB/"
 
 # --- Edit / Write / NotebookEdit ---------------------------------------------
 
@@ -114,23 +114,27 @@ for d in docs research tmp .orca-hub; do
   expect_allow "NotebookEdit under $d/" "$(notebook_json "$HUB/$d/nb.ipynb")"
 done
 
-expect_deny "Write at the hub root" "$(write_json "$HUB/CLAUDE.md")"
-expect_deny "Edit in another hub subdirectory" "$(edit_json "$HUB/src/main.sh")"
-expect_deny "Write to hub .claude/settings.json" "$(write_json "$HUB/.claude/settings.json")"
-expect_deny "Write outside the hub" "$(write_json "$OTHER/x.txt")"
-expect_deny "NotebookEdit outside the hub" "$(notebook_json "$OTHER/nb.ipynb")"
+expect_deny "Write at the Hub folder root" "$(write_json "$HUB/CLAUDE.md")"
+expect_deny "Edit in another Hub folder subdirectory" "$(edit_json "$HUB/src/main.sh")"
+expect_deny "Write to the Hub folder .claude/settings.json" "$(write_json "$HUB/.claude/settings.json")"
+expect_deny "Write outside the Hub folder" "$(write_json "$OTHER/x.txt")"
+expect_deny "NotebookEdit outside the Hub folder" "$(notebook_json "$OTHER/nb.ipynb")"
 expect_deny "Write to a sibling that shares the prefix (docs-evil/)" "$(write_json "$HUB/docs-evil/x.md")"
 expect_deny "Write escaping docs/ with .." "$(write_json "$HUB/docs/../src/x.sh")"
 expect_deny "Write escaping via a new dir and .." "$(write_json "$HUB/docs/new/../../src/x.sh")"
 expect_deny "Write through a symlink out of docs/ (realpath)" "$(write_json "$HUB/docs/link-to-src/x.sh")"
 expect_deny "Write to the docs directory itself" "$(write_json "$HUB/docs")"
 expect_deny "Write with an empty file_path" "$(write_json "")"
-expect_allow "relative file_path resolves against the hub" "$(write_json "tmp/scratch.txt")"
+expect_allow "relative file_path resolves against the Hub folder" "$(write_json "tmp/scratch.txt")"
 expect_deny "relative file_path outside the allowed dirs" "$(write_json "src/x.sh")"
 
 # --- subagents (agent_id present) --------------------------------------------
 
 expect_deny "subagent Write outside the allowed dirs" "$(write_json "$HUB/src/x.sh" a23b4893193300384)"
+expect_deny "subagent Bash with a denied command" \
+  "$(hook_json Bash '{"command":"python x.py","description":"d"}' a23b4893193300384)" python
+expect_allow "subagent Bash with an allowed command" \
+  "$(hook_json Bash '{"command":"gh issue list","description":"d"}' a23b4893193300384)"
 expect_allow "subagent Write under research/" "$(write_json "$HUB/research/r.md" a23b4893193300384)"
 expect_allow "Agent tool call is allowed" \
   "$(hook_json Agent '{"description":"d","prompt":"p","subagent_type":"general-purpose"}')"
@@ -149,8 +153,12 @@ expect_allow "Bash: pipe inside quotes is not a separator" \
   "$(bash_json "gh issue list --json number | jq '.[] | .number'")"
 expect_deny "Bash: escaped quote does not hide a separator" \
   "$(bash_json 'echo "a\"b"; python x.py')" python
+expect_deny "Bash: \$'...' quote does not hide a separator" \
+  "$(bash_json "echo \$'\\'' ; sed -i s/a/b/ src.py")" sed
+expect_allow "Bash: \$'...' quote keeps its separators inside" "$(bash_json "echo \$'a;b' | wc -c")"
 expect_allow "Bash: skill script by basename" "$(bash_json '/path/to/scripts/issue-dispatch.sh 123')"
 expect_allow "Bash: frontier.sh by basename" "$(bash_json './frontier.sh')"
+expect_deny "Bash: skill script basename needs .sh" "$(bash_json '/usr/local/bin/issue-x')" '/usr/local/bin/issue-x'
 expect_allow "Bash: bash_allow[] from hub.json" "$(bash_json 'make docs')"
 
 expect_deny "Bash: command not on the allowlist" "$(bash_json 'rm -rf src')" rm
@@ -167,9 +175,9 @@ expect_deny "Bash: segment with >>" "$(bash_json 'ls && cat a >> b')" '>'
 expect_deny "Bash: env assignment prefix" "$(bash_json 'FOO=1 gh issue list')" 'FOO=1'
 expect_deny "Bash: skill scripts are matched by exact basename pattern" "$(bash_json './myissue-x.sh')" './myissue-x.sh'
 
-# --- malformed input in the hub ------------------------------------------------
+# --- malformed input in the Hub folder ------------------------------------------------
 
-expect_deny "malformed stdin in the hub is denied" 'not json'
+expect_deny "malformed stdin in the Hub folder is denied" 'not json'
 
 # --- summary ------------------------------------------------------------------
 

@@ -36,11 +36,17 @@ The Hub folder's machine-readable config. `init-hub` writes it to `<hub-dir>/.or
 
 ## How the Guard uses it
 
-`scripts/guard.sh` reads `$CLAUDE_PROJECT_DIR/.orca-hub/hub.json`. If the file is missing, or `hub_path` is not exactly `$CLAUDE_PROJECT_DIR`, the Guard prints nothing and exits 0 — Worker worktrees and every other session are never judged. In the Hub folder it applies these rules:
+`scripts/guard.sh` reads `$CLAUDE_PROJECT_DIR/.orca-hub/hub.json`. If the file is missing, cannot be parsed, or its `hub_path` is not exactly `$CLAUDE_PROJECT_DIR`, the Guard prints nothing and exits 0 — Worker worktrees and every other session are never judged. If the file exists but `jq` is not installed, the Guard cannot tell and denies (fail closed). In the Hub folder it applies these rules:
 
 - **Edit / Write / NotebookEdit** — allowed only when the realpath of `file_path` (`notebook_path` for NotebookEdit) is inside `<hub-dir>/docs/`, `research/`, `tmp/`, or `.orca-hub/`. Relative paths resolve against the Hub folder. Symlinks are followed; a `..` inside a not-yet-existing part of the path is denied.
-- **Bash** — the command is split on `&&`, `||`, `;`, `|`, a lone `&`, and newlines (separators inside quotes do not count). The first token of every segment must be on the allowlist: `orca`, `gh`, `git` (subcommands `status`, `log`, `diff`, `show`, `branch`, `worktree`, `remote`, `rev-parse`, `ls-files`, `fetch` only), `ls`, `cat`, `rg`, `grep`, `jq`, `head`, `tail`, `wc`, `find`, `echo`, `cd`, `pwd`, `test`, `[`, `true`, the skill's own scripts by basename (`issue-*`, `frontier`, `frontier.sh`), and `bash_allow[]`. A segment containing `>` anywhere, quoted or not, is denied — write files with the Write tool. Subshells (`$(...)`, backticks) are not parsed; `permissions.deny` is the second layer for destructive commands.
+- **Bash** — the command is split on `&&`, `||`, `;`, `|`, any other unquoted `&`, and newlines (separators inside `'...'`, `"..."`, and `$'...'` do not count). The first token of every segment must be on the allowlist: `orca`, `gh`, `git` (subcommands `status`, `log`, `diff`, `show`, `branch`, `worktree`, `remote`, `rev-parse`, `ls-files`, `fetch` only), `ls`, `cat`, `rg`, `grep`, `jq`, `head`, `tail`, `wc`, `find`, `echo`, `cd`, `pwd`, `test`, `[`, `true`, the skill's own scripts by basename (`issue-*.sh`, `frontier.sh`), and `bash_allow[]`. A segment containing `>` anywhere, quoted or not, is denied — write files with the Write tool. Subshells (`$(...)`, backticks) are not parsed; `permissions.deny` is the second layer for destructive commands.
 - **Everything else** (Agent, Read, Grep, ...) is left alone. Subagent calls, which carry `agent_id` and `agent_type`, get the same rules.
+
+Known gaps of the first version (the allowlist is a guard rail against accidental edits, not a sandbox):
+
+- Scripts are matched by basename only, so any `issue-*.sh` runs, including one written under `tmp/`.
+- Some allowlisted commands can still write or execute through their options, e.g. `git diff --output=<file>`, `find -exec`, `rg --pre`.
+- Command substitution and subshells are not inspected.
 
 A denial is exit 0 with this stdout (one line):
 

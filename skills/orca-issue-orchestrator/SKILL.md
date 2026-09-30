@@ -30,13 +30,14 @@ and follow what it says for Runs, Tasks, Dispatches, `worker-start`, `check`, `a
 
 ## Procedures
 
-These references carry the detail. Read the one you need before acting.
+Two procedures carry the detail. Read the one you need before acting.
 
 | Procedure | Reference | What it covers |
 |-----------|-----------|----------------|
 | **Guard** | `references/guard.md` | What the hook allows and denies in the Hub folder, the `permissions.deny` safety net, the Codex read-only sandbox, and how to read a denial |
 | **Issue sync** | `references/issue-sync.md` | Claim, Frontier, Spec template, dispatch, Mapping comment, success / failure closeout, recovery after an Orca restart |
-| **Hub config** | `references/hub-json.md` | The `.orca-hub/hub.json` schema and exactly what `guard.sh` allows and denies |
+
+The Hub folder config `.orca-hub/hub.json` and exactly what `scripts/guard.sh` allows and denies: `references/hub-json.md`.
 
 ## Orchestrator commands
 
