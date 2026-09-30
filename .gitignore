@@ -9,3 +9,6 @@
 
 # Local testing
 .claude/
+
+# Orca worktrees (created under .orca/worktrees/ inside this repo)
+.orca/
