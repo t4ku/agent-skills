@@ -1,0 +1,9 @@
+{
+  "number": 3,
+  "title": "Rate limit the export endpoint",
+  "state": "OPEN",
+  "url": "https://github.com/example/api/issues/3",
+  "assignees": [],
+  "body": "Limit the export endpoint to 10 requests a minute.",
+  "comments": []
+}

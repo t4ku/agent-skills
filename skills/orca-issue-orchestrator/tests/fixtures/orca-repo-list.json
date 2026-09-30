@@ -1,0 +1,5 @@
+{"ok": true, "result": {"repos": [
+  {"id": "repo-other-id", "displayName": "other", "gitRemoteIdentity": null},
+  {"id": "repo-app-id", "displayName": "app", "gitRemoteIdentity": {"canonicalKey": "github.com/example/app", "remoteName": "origin"}},
+  {"id": "repo-api-id", "displayName": "api", "gitRemoteIdentity": {"canonicalKey": "github.com/example/api", "remoteName": "origin"}}
+]}}

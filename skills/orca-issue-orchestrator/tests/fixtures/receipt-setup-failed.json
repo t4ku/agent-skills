@@ -1,0 +1,10 @@
+{"ok": false, "result": {
+  "worker": {
+    "dispatchId": "ctx_test2",
+    "taskId": "task_test1",
+    "state": "failed",
+    "failedStage": "placement",
+    "effects": [],
+    "residualResources": []
+  }
+}}

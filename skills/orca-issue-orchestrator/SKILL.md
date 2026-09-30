@@ -46,8 +46,8 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 | Script | Purpose |
 |--------|---------|
 | `scripts/init-hub` | Write the Guard, Orchestrator instructions, and `.orca-hub/hub.json` into an existing Hub folder |
-| `scripts/frontier` | List open, unblocked, unassigned `ready-for-agent` Issues across the configured repos |
-| `scripts/issue-dispatch` | Claim an Issue, create the Task, start the Worker, link the worktree, post the Mapping comment |
+| `scripts/frontier.sh` | List open, unblocked, unassigned `ready-for-agent` Issues across the configured repos (read-only) |
+| `scripts/issue-dispatch.sh` | Claim an Issue and create the Task; print the `worker-start` and `worktree set` to run; from the `worker-start` receipt, post the Mapping comment |
 | `scripts/issue-closeout` | Post the success or failure comment, adjust assignee / labels on failure, release the Worker |
 | `scripts/guard.sh` | The PreToolUse hook; `init-hub` copies it into `.orca-hub/`. Hook-contract tests: `tests/guard.test.sh` |
 

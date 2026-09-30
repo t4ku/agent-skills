@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Fake `orca` for the Issue-script tests. Appends its argv to $FAKE_LOG as one
+# JSON array per line and answers from recorded JSON under $FAKE_FIXTURES.
+# A file of the same name under $FAKE_OVERRIDES (if set) wins.
+set -u
+
+{ printf '%s\0' orca "$@"; } | jq -Rsc 'split("\u0000") | .[:-1]' >> "$FAKE_LOG"
+
+fixture() {
+  if [ -n "${FAKE_OVERRIDES:-}" ] && [ -f "$FAKE_OVERRIDES/$1" ]; then
+    cat "$FAKE_OVERRIDES/$1"
+  elif [ -f "$FAKE_FIXTURES/$1" ]; then
+    cat "$FAKE_FIXTURES/$1"
+  else
+    printf 'fake orca: no fixture %s\n' "$1" >&2
+    exit 1
+  fi
+}
+
+case "${1:-} ${2:-}" in
+  "repo list") fixture orca-repo-list.json ;;
+  "worktree list") fixture orca-worktree-list.json ;;
+  "orchestration run-current") fixture orca-run-current.json ;;
+  "orchestration task-create") fixture orca-task-create.json ;;
+  *)
+    # Mutations the scripts must never run (worker-start, worktree set, ...).
+    printf '{"ok":true,"result":{}}\n'
+    ;;
+esac
