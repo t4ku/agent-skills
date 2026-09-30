@@ -32,14 +32,14 @@ The Hub folder's machine-readable config. `init-hub` writes it to `<hub-dir>/.or
 | `repos[].name` | string | yes | `<owner>/<repo>`. Matched against `gitRemoteIdentity.canonicalKey` (`github.com/<owner>/<repo>`) in `orca repo list --json`. |
 | `repos[].base_branch` | string | no | Base branch for Worker worktrees. Defaults to the repo's default branch. |
 | `repos[].constraints[]` | array of strings | no | Extra constraints pasted into every Spec for this repo. |
-| `bash_allow[]` | array of strings | no | Extra command names the Guard allows as the first token of a Bash segment, on top of the default allowlist. Matched as exact strings. |
+| `bash_allow[]` | array of strings | no | Extra command names the Guard allows as the first word of a Bash segment, on top of the default allowlist. Matched as exact strings. |
 
 ## How the Guard uses it
 
 `scripts/guard.sh` reads `$CLAUDE_PROJECT_DIR/.orca-hub/hub.json`. If the file is missing, cannot be parsed, or its `hub_path` is not exactly `$CLAUDE_PROJECT_DIR`, the Guard prints nothing and exits 0 — Worker worktrees and every other session are never judged. If the file exists but `jq` is not installed, the Guard cannot tell and denies (fail closed). In the Hub folder it applies these rules:
 
 - **Edit / Write / NotebookEdit** — allowed only when the realpath of `file_path` (`notebook_path` for NotebookEdit) is inside `<hub-dir>/docs/`, `research/`, `tmp/`, or `.orca-hub/`. Relative paths resolve against the Hub folder. Symlinks are followed; a `..` inside a not-yet-existing part of the path is denied.
-- **Bash** — the command is split on `&&`, `||`, `;`, `|`, any other unquoted `&`, and newlines (separators inside `'...'`, `"..."`, and `$'...'` do not count). The first token of every segment must be on the allowlist: `orca`, `gh`, `git` (subcommands `status`, `log`, `diff`, `show`, `branch`, `worktree`, `remote`, `rev-parse`, `ls-files`, `fetch` only), `ls`, `cat`, `rg`, `grep`, `jq`, `head`, `tail`, `wc`, `find`, `echo`, `cd`, `pwd`, `test`, `[`, `true`, the skill's own scripts by basename (`issue-*.sh`, `frontier.sh`), and `bash_allow[]`. A segment containing `>` anywhere, quoted or not, is denied — write files with the Write tool. Subshells (`$(...)`, backticks) are not parsed; `permissions.deny` is the second layer for destructive commands.
+- **Bash** — the command is split on `&&`, `||`, `;`, `|`, any other unquoted `&`, and newlines (separators inside `'...'`, `"..."`, and `$'...'` do not count). The first word of every segment, read with shell quoting (`'...'`, `"..."`, backslash escapes) and with its quotes removed, must be on the allowlist: `orca`, `gh`, `git` (subcommands `status`, `log`, `diff`, `show`, `branch`, `worktree`, `remote`, `rev-parse`, `ls-files`, `fetch` only), `ls`, `cat`, `rg`, `grep`, `jq`, `head`, `tail`, `wc`, `find`, `echo`, `cd`, `pwd`, `test`, `[`, `true`, the skill's own scripts by basename (`issue-*.sh`, `frontier.sh`), and `bash_allow[]`. A first word that would need expansion (`$` or a backtick outside single quotes, including `$VAR`, `$(...)` and `$'...'`; an unquoted `{`, `*`, `?`, `[` or `(`, except `[` as the whole word), or that does not parse (an unterminated quote, a trailing backslash), is denied; nothing is ever evaluated. A segment containing `>` anywhere, quoted or not, is denied — write files with the Write tool. A `#` that starts an unquoted word begins a comment up to the newline. Subshells (`$(...)`, backticks) are denied as the first word and not parsed anywhere else; `permissions.deny` is the second layer for destructive commands.
 - **Everything else** (Agent, Read, Grep, ...) is left alone. Subagent calls, which carry `agent_id` and `agent_type`, get the same rules.
 
 Known gaps of the first version (the allowlist is a guard rail against accidental edits, not a sandbox):
@@ -54,7 +54,7 @@ A denial is exit 0 with this stdout (one line):
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Editing code is forbidden in the orchestrator. Create a Task with orca orchestration and delegate it (see /orca-issue-orchestrator)."}}
 ```
 
-Bash denials append ` Blocked segment: <token>` to the reason, where `<token>` is the first token of the blocked segment, `git <subcommand>` for a git subcommand outside the list, or `>` for a redirect. Malformed hook input in the Hub folder is denied.
+Bash denials append ` Blocked segment: <token>` to the reason, where `<token>` is the first word of the blocked segment (unquoted, or as written when it needs expansion or does not parse), `git <subcommand>` for a git subcommand outside the list, or `>` for a redirect. Malformed hook input in the Hub folder is denied.
 
 ## Tests
 

@@ -175,6 +175,56 @@ expect_deny "Bash: segment with >>" "$(bash_json 'ls && cat a >> b')" '>'
 expect_deny "Bash: env assignment prefix" "$(bash_json 'FOO=1 gh issue list')" 'FOO=1'
 expect_deny "Bash: skill scripts are matched by exact basename pattern" "$(bash_json './myissue-x.sh')" './myissue-x.sh'
 
+# --- Bash: quoted command tokens ---------------------------------------------------
+
+expect_allow "Bash: double-quoted command name" "$(bash_json '"gh" issue list')"
+expect_allow "Bash: single-quoted command name" "$(bash_json "'gh' issue list")"
+expect_allow "Bash: concatenated quoted parts form one word" "$(bash_json '"g"h issue list')"
+expect_allow "Bash: backslash-escaped command name" "$(bash_json 'g\h issue list')"
+expect_allow "Bash: quoted skill script path with spaces, by basename" \
+  "$(bash_json '"/tmp/dir with spaces/issue-dispatch.sh" 123')"
+expect_allow "Bash: quoted git subcommand" "$(bash_json 'git "status"')"
+expect_deny "Bash: quoted script path not on the allowlist" "$(bash_json '"/tmp/x/evil.sh"')" /tmp/x/evil.sh
+expect_deny "Bash: quoted git subcommand not allowed" "$(bash_json "git 'commit' -m x")" "git commit"
+expect_deny "Bash: empty quoted command name" "$(bash_json '"" gh')" '""'
+# Single quotes below keep $, ` and \ literal on purpose: they are the input.
+# shellcheck disable=SC2016,SC1003
+{
+  expect_deny "Bash: \$'...' command name is not evaluated" "$(bash_json "\$'gh' x")" "\$'gh'"
+  expect_deny "Bash: variable in a quoted command name" "$(bash_json '"$X" x')" '"$X"'
+  expect_deny "Bash: bare variable command name" "$(bash_json '$X x')" '$X'
+  expect_deny "Bash: backtick command name" "$(bash_json '`gh` x')" '`gh`'
+  expect_deny "Bash: command substitution command name" "$(bash_json '$(echo gh) x')" '$(echo'
+  expect_deny "Bash: variable in a git subcommand" "$(bash_json 'git "$S"')" 'git "$S"'
+  expect_deny "Bash: unterminated quote in the command name" "$(bash_json '"gh issue list')" '"gh issue list'
+  expect_deny "Bash: trailing backslash in the command name" "$(bash_json 'gh\')" 'gh\'
+}
+
+expect_deny "Bash: brace expansion in the command name" \
+  "$(bash_json '{/tmp/evil,/x/issue-}.sh')" '{/tmp/evil,/x/issue-}.sh'
+expect_deny "Bash: glob in the command name" "$(bash_json '/tmp/*/issue-a.sh')" '/tmp/*/issue-a.sh'
+expect_deny "Bash: ? glob in the command name" "$(bash_json 'g? issue list')" 'g?'
+expect_deny "Bash: [ glob in the command name" "$(bash_json '/x/issue-[a].sh')" '/x/issue-[a].sh'
+expect_allow "Bash: quoted glob characters are literal" "$(bash_json '"/tmp/{x}/issue-a.sh"')"
+expect_allow "Bash: git subcommand after a line continuation" "$(bash_json "$(printf 'git \\\n  status')")"
+expect_deny "Bash: git subcommand after a line continuation is named" \
+  "$(bash_json "$(printf 'git \\\n  push')")" "git push"
+
+# --- Bash: comments -------------------------------------------------------------
+
+expect_allow "Bash: trailing comment" "$(bash_json 'gh issue list # rm -rf x')"
+expect_allow "Bash: # inside a word is not a comment" "$(bash_json 'echo a#b')"
+expect_deny "Bash: a quote inside a comment does not hide the next line" \
+  "$(bash_json "$(printf "gh # '\nrm -rf x")")" rm
+expect_deny "Bash: a backslash ending a comment does not join the next line" \
+  "$(bash_json "$(printf 'gh # x \\\nrm -rf x')")" rm
+expect_deny "Bash: a comment after a line continuation still ends at the newline" \
+  "$(bash_json "$(printf "gh \\\\\n#'\nrm -rf x")")" rm
+expect_allow "Bash: # right after a line continuation joins the word" \
+  "$(bash_json "$(printf 'echo a\\\n#b')")"
+expect_deny "Bash: a separator inside a comment starts nothing, the next line is checked" \
+  "$(bash_json "$(printf 'ls # ; ok\nsed -i s/a/b/ f')")" sed
+
 # --- bash_allow[] matches whole elements -----------------------------------------
 
 # set_bash_allow <JSON value>: rewrite bash_allow in the Hub folder hub.json.

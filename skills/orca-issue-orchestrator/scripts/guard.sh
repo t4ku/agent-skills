@@ -7,9 +7,11 @@
 # exit 0. In the Hub folder:
 #   - Edit / Write / NotebookEdit: allowed only when the realpath of the target
 #     is under docs/, research/, tmp/, or .orca-hub/ of the Hub folder.
-#   - Bash: the command is split on && || ; | (and any & / newline); the first token
-#     of every segment must be on the allowlist (plus bash_allow[] from
-#     hub.json). A segment containing > is denied.
+#   - Bash: the command is split on && || ; | (and any & / newline); the first word
+#     of every segment, with its quotes and escapes removed, must be on the
+#     allowlist (plus bash_allow[] from hub.json). A first word that needs
+#     expansion ($, `, $'...') or does not parse is denied, as is a segment
+#     containing >.
 #   - Every other tool (Agent, Read, ...) is left alone.
 # A denial is exit 0 with hookSpecificOutput.permissionDecision "deny".
 #
@@ -110,21 +112,83 @@ in_bash_allow() {
   jq -e --arg w "$1" 'any(.bash_allow | arrays | .[]; . == $w)' "$config" >/dev/null 2>&1
 }
 
+# scan_word <text> <index>: read one shell word of <text> starting at <index>,
+# skipping leading blanks. Sets word_raw (the word as
+# written), word (with quotes and escapes removed, nothing expanded) and
+# word_end (the index after the word); word_raw is empty when no word is left.
+# Fails when the word cannot be taken literally: it contains $ or ` outside
+# single quotes (this covers $VAR, $(...) and $'...'), an unquoted { * ? [ or (
+# (brace expansion, globs; a word that is exactly [ is the test command), an
+# unterminated quote, or a trailing backslash.
+scan_word() {
+  local s="$1" i="$2" start c quote="" bad=0
+  word=""
+  while [ "$i" -lt "${#s}" ]; do
+    case "${s:i:1}" in
+      ' '|$'\t') i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  start=$i
+  for ((; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    if [ "$quote" = "'" ]; then
+      if [ "$c" = "'" ]; then quote=""; else word="$word$c"; fi
+      continue
+    fi
+    if [ "$quote" = '"' ]; then
+      case "$c" in
+        '"') quote="" ;;
+        '$'|'`') bad=1; word="$word$c" ;;
+        "\\")
+          case "${s:i+1:1}" in
+            '$'|'`'|'"'|"\\") word="$word${s:i+1:1}"; i=$((i + 1)) ;;
+            $'\n') i=$((i + 1)) ;;
+            *) word="$word$c" ;;
+          esac ;;
+        *) word="$word$c" ;;
+      esac
+      continue
+    fi
+    case "$c" in
+      ' '|$'\t'|$'\n') break ;;
+      "'"|'"') quote="$c" ;;
+      '$'|'`'|'{'|'*'|'?'|'['|'(') bad=1; word="$word$c" ;;
+      "\\")
+        if [ $((i + 1)) -ge "${#s}" ]; then
+          bad=1
+        else
+          word="$word${s:i+1:1}"; i=$((i + 1))
+        fi ;;
+      *) word="$word$c" ;;
+    esac
+  done
+  word_raw="${s:start:i-start}"
+  word_end=$i
+  [ "$word_raw" = '[' ] && bad=0
+  [ -z "$quote" ] && [ "$bad" -eq 0 ]
+}
+
 # check_segment <segment>: deny unless the segment may run.
 check_segment() {
   local seg="$1" first second
   case "$seg" in
     *'>'*) deny '>' ;;
   esac
-  read -r first second _ <<< "$seg"
-  [ -n "$first" ] || return 0
+  scan_word "$seg" 0 || deny "$word_raw"
+  [ -n "$word_raw" ] || return 0
+  first="$word"
+  [ -n "$first" ] || deny "$word_raw"
   if [ "$first" = git ]; then
-    in_list "${second:-}" "$ALLOWED_GIT" && return 0
+    scan_word "$seg" "$word_end" || deny "git $word_raw"
+    second="$word"
+    in_list "$second" "$ALLOWED_GIT" && return 0
     deny "git${second:+ $second}"
   fi
   in_list "$first" "$ALLOWED_COMMANDS" && return 0
   in_bash_allow "$first" && return 0
-  case "$(basename -- "$first")" in
+  # ${first##*/} rather than basename(1): $(...) would strip trailing newlines.
+  case "${first##*/}" in
     issue-*.sh|frontier.sh) return 0 ;;
   esac
   deny "$first"
@@ -132,8 +196,10 @@ check_segment() {
 
 # check_command <command>: split on unquoted ; & | and newlines (which covers
 # && and ||) and check every segment. Quote state tracks '...', "..." and
-# $'...' (where a backslash escapes the closing quote). Subshells are not
-# parsed.
+# $'...' (where a backslash escapes the closing quote). Unquoted line
+# continuations are dropped, as bash does. An unquoted # that starts a word
+# begins a comment, dropped up to the newline: quotes, backslashes and
+# separators inside it mean nothing. Subshells are not parsed.
 check_command() {
   local cmd="$1" seg="" quote="" c i
   for ((i = 0; i < ${#cmd}; i++)); do
@@ -156,7 +222,18 @@ check_command() {
           seg="$seg$c"
         fi ;;
       "'"|'"') quote="$c"; seg="$seg$c" ;;
-      "\\") seg="$seg$c${cmd:i+1:1}"; i=$((i + 1)) ;;
+      '#')
+        case "${seg: -1}" in
+          ''|' '|$'\t')
+            while [ $((i + 1)) -lt "${#cmd}" ] && [ "${cmd:i+1:1}" != $'\n' ]; do
+              i=$((i + 1))
+            done ;;
+          *) seg="$seg$c" ;;
+        esac ;;
+      "\\")
+        # A line continuation is removed before bash sees words or comments.
+        [ "${cmd:i+1:1}" = $'\n' ] || seg="$seg$c${cmd:i+1:1}"
+        i=$((i + 1)) ;;
       ';'|'&'|'|'|$'\n') check_segment "$seg"; seg="" ;;
       *) seg="$seg$c" ;;
     esac
