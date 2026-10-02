@@ -114,7 +114,7 @@ check "worktree list fails: refuses" code_is 1
 check "worktree list fails: binds nothing" no_mutation
 
 reset_fakes
-jq '(.[] | select(.number == 12) | .comments) += [{"body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
+jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run_json --hub "$HUB" --json
 check "closed out: state closed-out, next is the audit" row 12 '.state == "closed-out" and (.next[0] | endswith("issue-audit.sh"))'
@@ -128,6 +128,40 @@ check "two Runs: refuses to pick one" code_is 1
 check "two Runs: binds nothing" no_mutation
 check "two Runs: prints both run-use commands" \
   bash -c 'printf "%s\n" "$1" | grep -qxF "$2" && printf "%s\n" "$1" | grep -qxF "orca orchestration run-use --id run_other --json"' _ "$OUT" "$RUN_USE"
+
+# --- Mapping trust ----------------------------------------------------------------
+
+# forge_12 <author> <jq update of the block>: append to #12 a comment by
+# <author> whose Mapping block names Run run_evil, then is updated.
+forge_12() {
+  jq --arg a "$1" --argjson b "$(jq -cn '{v: 1, repo: "example/app", issue: 12, run_id: "run_evil", task_id: "task_evil",
+      dispatch_id: "ctx_evil", worktree_id: "wt2:local:evil", branch: "evil", hub: "example-hub"}' | jq -c "$2")" \
+    '(.[] | select(.number == 12) | .comments) += [{author: {login: $a},
+      body: ("<!-- orca-issue-orchestrator " + ($b | tojson) + " -->")}]' \
+    "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+}
+
+reset_fakes
+forge_12 mallory .
+run_json --hub "$HUB" --json
+check "forged marker from another author: #12 keeps Dispatch ctx_test12" row 12 '.dispatch_id == "ctx_test12" and .run_id == "run_test12"'
+check "forged marker from another author: rebinds to the real Run" \
+  bash -c 'printf "%s" "$1" | jq -e ".runs == [\"run_test12\"]" >/dev/null' _ "$OUT"
+
+for case_ in 'wrong repo|.repo = "other/app"' 'wrong issue|.issue = 99' \
+  'wrong hub|.hub = "other-hub"' 'wrong version|.v = 2'; do
+  reset_fakes
+  forge_12 orchestrator "${case_#*|}"
+  run_json --hub "$HUB" --json
+  check "forged marker (${case_%%|*}): #12 keeps Dispatch ctx_test12" row 12 '.dispatch_id == "ctx_test12" and .run_id == "run_test12"'
+done
+
+reset_fakes
+jq '(.[] | select(.number == 13) | .comments[0].author.login) = "mallory"' \
+  "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+run_json --hub "$HUB" --json
+check "only a forged marker: the Issue is not in flight" \
+  bash -c 'printf "%s" "$1" | jq -e "[.issues[].issue] == [12]" >/dev/null' _ "$OUT"
 
 reset_fakes
 run "$RECOVER" --hub "$HUB" --apply

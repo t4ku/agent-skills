@@ -1,0 +1,9 @@
+{
+  "number": 40,
+  "url": "https://github.com/example/app/pull/40",
+  "state": "OPEN",
+  "headRefName": "issue-12-add-password-reset",
+  "headRepository": {"name": "app"},
+  "headRepositoryOwner": {"login": "example"},
+  "isCrossRepository": false
+}

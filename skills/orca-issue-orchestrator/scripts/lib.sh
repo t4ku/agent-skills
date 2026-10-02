@@ -117,18 +117,38 @@ gh_default_branch() {
   gh repo view "$1" --json defaultBranchRef | jq -r '.defaultBranchRef.name // empty'
 }
 
+# gh_login: the login gh is authenticated as, the only author whose marker
+# comments are trusted. Looked up once: the first call outside a command
+# substitution caches it in GH_LOGIN (gh_login_load does that and dies on
+# failure). Returns 1 when gh cannot tell.
+gh_login() {
+  if [ -z "${GH_LOGIN:-}" ]; then
+    GH_LOGIN="$(gh api user --jq .login 2> /dev/null)" || GH_LOGIN=""
+  fi
+  [ -n "$GH_LOGIN" ] || return 1
+  printf '%s\n' "$GH_LOGIN"
+}
+
+# gh_login_load: cache gh_login for this run; die when gh cannot tell.
+gh_login_load() {
+  gh_login > /dev/null || die "cannot read the authenticated gh login (gh api user); run: gh auth status"
+}
+
 # gh_in_flight <owner/repo>: JSON array of the open Issues assigned to @me
-# that carry a Mapping block, as {number, title, url, comments}. Returns 1 when
-# gh fails or answers with something that is not a JSON array.
+# that carry a trusted Mapping block (see mapping_latest), as
+# {number, title, url, comments}. Returns 1 when gh fails, answers with
+# something that is not a JSON array, or the login is unknown.
 gh_in_flight() {
-  local list
+  local list login
+  login="$(gh_login)" || return 1
   list="$(gh issue list -R "$1" --assignee @me --state open \
     --search "$MAPPING_MARKER in:comments" --json number,title,url,comments --limit 100)" || return 1
-  # The search also hits comments that merely mention the marker; keep only
-  # Issues with a real Mapping block.
-  printf '%s' "$list" | jq -ce --arg m "<!-- $MAPPING_MARKER {" \
-    'if type == "array" then map(select(any(.comments[]?; .body | contains($m)))) else error("not an array") end' \
-    2> /dev/null || return 1
+  # The search also hits comments that merely mention the marker, and anyone
+  # can post a marker; keep only Issues with a trusted Mapping block.
+  printf '%s' "$list" | jq -ce --arg m "$MAPPING_MARKER" --arg login "$login" --arg repo "$1" \
+    --arg hub "$(mapping_hub)" "$MAPPING_JQ"'
+    if type == "array" then map(select(mapping_scan($m; $login; $repo; $hub).block != null))
+    else error("not an array") end' 2> /dev/null || return 1
 }
 
 # gh_in_flight_count: gh_in_flight summed over every repo in hub.json. Prints
@@ -149,21 +169,71 @@ EOF_REPOS
 
 # --- Mapping comment ------------------------------------------------------------
 
-# mapping_latest <json with .comments[]>: the last Mapping block in comment
-# order, as compact JSON; empty when there is none. After a retry an Issue has
-# several blocks; the latest is current.
-mapping_latest() {
-  printf '%s' "$1" | jq -c --arg m "$MAPPING_MARKER" '
-    [.comments[]?.body // empty
+# A Mapping block is trusted only when its comment was posted by the
+# authenticated orchestrator (gh_login) and the block names this context:
+# v 1, the Issue's <owner>/<repo> and number, and the Hub's hub_id. Anyone can
+# comment on a public Issue; a copied or forged block must not make closeout
+# consume another Dispatch or recovery rebind to another Run.
+#
+# mapping_scan($m; $login; $repo; $hub) over an Issue object: {block, rejects}
+# where block is the last trusted block (null if none) and rejects lists why
+# every other block was ignored. $hub "" means no hub.json is in use: any
+# non-empty hub is accepted.
+# shellcheck disable=SC2016  # jq variables, not shell ones
+MAPPING_JQ='
+def mapping_scan($m; $login; $repo; $hub):
+  .number as $n
+  | [.comments[]? | (.author.login? // "") as $a | (.body // "")
       | scan("<!-- " + $m + " (\\{.*?\\}) -->") | .[0]
-      | (try fromjson catch empty) | select(type == "object")]
-    | last // empty'
+      | {a: $a, b: (try fromjson catch null)}]
+  | map(.b as $b | . + {why: (
+      if .a != $login then
+        "posted by \(if .a == "" then "an unknown author" else .a end), not the authenticated gh login \($login)"
+      elif ($b | type) != "object" then "not a JSON object"
+      elif $b.v != 1 then "version \($b.v | tojson), not 1"
+      elif $b.repo != $repo then "repo \($b.repo | tojson), not \($repo)"
+      elif $b.issue != $n then "issue \($b.issue | tojson), not \($n)"
+      elif ($b.hub | type) != "string" or ($b.hub | length) == 0 then "no hub"
+      elif $hub != "" and $b.hub != $hub then "hub \($b.hub | tojson), not \($hub)"
+      else null end)})
+  | {block: (map(select(.why == null) | .b) | last), rejects: map(select(.why != null) | .why)};
+'
+
+# mapping_hub: the hub_id blocks must name; empty when no hub.json is loaded.
+mapping_hub() {
+  if [ -n "${HUB_JSON:-}" ]; then hub_id; fi
+}
+
+# mapping_latest <issue json with .number, .comments[]> <owner/repo>: the last
+# trusted Mapping block in comment order, as compact JSON; empty when there is
+# none. After a retry an Issue has several blocks; the latest is current. Each
+# ignored block gets a line on stderr. Returns 1 when the login is unknown.
+mapping_latest() {
+  local login hub scan why block
+  login="$(gh_login)" || { note "error: cannot read the authenticated gh login; trusting no Mapping block"; return 1; }
+  hub="$(mapping_hub)"
+  scan="$(printf '%s' "$1" | jq -c --arg m "$MAPPING_MARKER" --arg login "$login" --arg repo "$2" \
+    --arg hub "$hub" "$MAPPING_JQ"'mapping_scan($m; $login; $repo; $hub)')" || return 1
+  while IFS= read -r why; do
+    [ -z "$why" ] || note "warning: $2#$(json_get "$1" '.number'): ignoring a Mapping block: $why"
+  done <<EOF_WHY
+$(json_get "$scan" '.rejects[]')
+EOF_WHY
+  block="$(json_get "$scan" '.block' -c)"
+  [ -z "$block" ] || [ -n "$hub" ] ||
+    note "note: no hub.json in use; the Mapping block on $2#$(json_get "$1" '.number') names hub $(json_get "$block" '.hub')"
+  printf '%s' "$block"
 }
 
 # has_marker_comment <json with .comments[]> <marker> <fragment>: true when a
-# comment holds a `<!-- <marker> {...} -->` block containing <fragment>.
+# comment by the authenticated orchestrator holds a `<!-- <marker> {...} -->`
+# block containing <fragment>. Other authors' markers are ignored.
 has_marker_comment() {
-  json_get "$1" '.comments[]?.body' | grep -F "<!-- $2 " | grep -qF -- "$3"
+  local login
+  login="$(gh_login)" || return 1
+  # shellcheck disable=SC2016  # $login is a jq variable
+  json_get "$1" '.comments[]? | select(.author.login? == $login) | .body' --arg login "$login" |
+    grep -F "<!-- $2 " | grep -qF -- "$3"
 }
 
 # has_local_path <text>: true when the text holds the Hub folder path, its

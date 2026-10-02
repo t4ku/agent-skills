@@ -112,7 +112,14 @@ check "apply: prints the next step that takes the receipt" out_has "--receipt - 
 # --- issue-dispatch.sh: refusals ------------------------------------------------
 
 # One open Issue assigned to @me with a Mapping block.
-IN_FLIGHT_ONE='[{"number": 5, "comments": [{"body": "<!-- orca-issue-orchestrator {\"v\":1} -->"}]}]'
+# in_flight_api <author> <jq update of the block>: example/api#5 in flight,
+# its one Mapping block posted by <author>, then updated.
+in_flight_api() {
+  jq -cn --arg a "$1" --argjson b "$(jq -cn '{v: 1, repo: "example/api", issue: 5, run_id: "run_test1", task_id: "task_5",
+      dispatch_id: "ctx_5", worktree_id: "wt2:local:inst-5", branch: "issue-5", hub: "example-hub"}' | jq -c "$2")" \
+    '[{number: 5, comments: [{author: {login: $a}, body: ("<!-- orca-issue-orchestrator " + ($b | tojson) + " -->")}]}]'
+}
+IN_FLIGHT_ONE="$(in_flight_api orchestrator .)"
 
 reset_fakes
 printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
@@ -133,6 +140,22 @@ reset_fakes
 echo '[{"number": 5, "comments": [{"body": "We could use orca-issue-orchestrator here."}]}]' > "$OVR/inflight-example_api.json"
 run "$DISPATCH" example/app 7 --hub "$HUB"
 check "concurrency: a comment that only mentions the marker does not count" code_is 0
+
+for case_ in 'another author|mallory|.' 'wrong repo|orchestrator|.repo = "example/app"' \
+  'wrong issue|orchestrator|.issue = 6' 'wrong hub|orchestrator|.hub = "other-hub"' 'wrong version|orchestrator|.v = 2'; do
+  rest="${case_#*|}"
+  reset_fakes
+  in_flight_api "${rest%%|*}" "${rest#*|}" > "$OVR/inflight-example_api.json"
+  run "$DISPATCH" example/app 7 --hub "$HUB"
+  check "concurrency: a forged Mapping block (${case_%%|*}) does not count" code_is 0
+done
+
+reset_fakes
+printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
+touch "$OVR/user.json.fail"
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply --force
+check "concurrency: an unknown login refuses (fail closed)" code_is 1
+check "concurrency: an unknown login claims nothing" no_mutation
 
 reset_fakes
 printf 'not json\n' > "$OVR/inflight-example_api.json"
@@ -205,11 +228,17 @@ run "$DISPATCH" example/app 7 --hub . --receipt "$FIXTURES/receipt-ready.json" -
 check "receipt apply: a relative --hub still posts the comment" called "gh issue comment 7"
 
 reset_fakes
-jq '.comments = [{"body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: does not post a second Mapping comment for the same Dispatch" not_called "gh issue comment"
 check "receipt apply: says the comment exists" out_has "already"
+
+reset_fakes
+jq '.comments = [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a forged Mapping comment does not stop the real one" called "gh issue comment 7"
 
 # --- issue-dispatch.sh --receipt: failed worker-start ------------------------------
 

@@ -39,7 +39,7 @@ Before any write it checks, and refuses (exit 1) when one fails:
 
 1. `<owner>/<repo>` is in `hub.json` `repos[]`.
 2. The Issue is open and has no assignee.
-3. **Concurrency**: the open Issues assigned to `@me` whose comments hold a Mapping block, summed over every configured repo, are fewer than `concurrency` (default 1). `--force` dispatches anyway. If the count cannot be read, it refuses. An Issue between step 1 and step 2 has no Mapping block yet and is not counted, so finish step 2 before dispatching the next Issue.
+3. **Concurrency**: the open Issues assigned to `@me` whose comments hold a trusted Mapping block (see [Which blocks are trusted](#which-blocks-are-trusted)), summed over every configured repo, are fewer than `concurrency` (default 1). `--force` dispatches anyway. If the count cannot be read (gh fails, or the authenticated login is unknown), it refuses. An Issue between step 1 and step 2 has no Mapping block yet and is not counted, so finish step 2 before dispatching the next Issue.
 4. An Orca repo matches: `orca repo list --json`, `.result.repos[]` with `.gitRemoteIdentity.canonicalKey == "github.com/<owner>/<repo>"`, used as `id:<repo-id>`.
 5. A Run is bound to this terminal (`orca orchestration run-current --json`). Without one, `--apply` refuses and prints `orca orchestration run-create`. One Run per Orchestrator session.
 
@@ -138,7 +138,18 @@ Dispatched to an Orca worker.
 | `branch` | The worktree's branch, without `refs/heads/` |
 | `hub` | `hub_id` from `hub.json`, never a path |
 
-The marker `orca-issue-orchestrator` is how recovery and the concurrency count find in-flight Issues. After a retry there may be several blocks on one Issue; the latest is current.
+The marker `orca-issue-orchestrator` is how recovery and the concurrency count find in-flight Issues. After a retry there may be several blocks on one Issue; the latest trusted one is current.
+
+### Which blocks are trusted
+
+Anyone can comment on a public Issue, so a copied or forged block must not make closeout consume another Dispatch or recovery rebind to another Run. Closeout, audit, recovery, and the concurrency count in dispatch read only blocks that pass every check:
+
+- The comment's author is the login gh is authenticated as (`gh api user --jq .login`, looked up once per run). If it cannot be read, the script refuses.
+- `v` is `1`.
+- `repo` is the Issue's `<owner>/<repo>` and `issue` is its number.
+- `hub` is the `hub_id` in `hub.json` (without a loaded `hub.json`, any non-empty `hub` is accepted and its value is logged).
+
+Every other block is skipped with a `warning: <owner>/<repo>#123: ignoring a Mapping block: <reason>` line on stderr. An Issue with no trusted block is not in flight. The closeout and audit markers (and the Mapping-comment dedupe in step 2 of dispatch) likewise count only when the authenticated login posted them, so a forged marker cannot suppress a real comment.
 
 ## Closeout
 
@@ -153,9 +164,9 @@ orca orchestration check --json | scripts/issue-closeout.sh <owner>/<repo> 123 f
 
 `check` replays the same batch until you `--ack` it, so preview and apply see the same messages; acknowledge only after the closeout. The Guard denies `>`, so to keep a batch use the Write tool under `tmp/` and pass the file instead of `-`.
 
-From a batch it takes the last message with `type == "worker_done"` whose `.payload | fromjson` has the `dispatchId` of the Issue's latest Mapping block; heartbeats and other Dispatches in the same batch are ignored. The summary is the message `.body`; `filesModified[]` and `reportPath` come from the payload. If the payload's `outcome` differs from the argument, or the batch has no `worker_done` for that Dispatch, it refuses. With a plain-text file, pass `--files a,b` for the files modified. `-` reads stdin.
+From a batch it takes the last message with `type == "worker_done"` whose `.payload | fromjson` has the `dispatchId` of the Issue's latest Mapping block; heartbeats and other Dispatches in the same batch are ignored. The summary is the message `.body`; `filesModified[]` and `reportPath` come from the payload. If the payload's `outcome` differs from the argument, or the batch has no `worker_done` for that Dispatch, it refuses. With a plain-text file, pass `--files a,b` for the files modified (`--files` also overrides the payload). `-` reads stdin.
 
-**Success** (`succeeded`, the PR is open): one comment, nothing else. Labels and assignee stay as they are; the assignee keeps the Issue out of the Frontier until the PR merges.
+**Success** (`succeeded`, the PR is open, at least one file modified): one comment, nothing else. Labels and assignee stay as they are; the assignee keeps the Issue out of the Frontier until the PR merges.
 
 ```
 > *Posted by an AI orchestrator.*
@@ -174,7 +185,16 @@ Worktree `issue-123-<slug>` (branch `<branch>`) is kept for review.
 <!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"succeeded"} -->
 ```
 
-The PR is `--pr <url>`, else the first `https://github.com/<owner>/<repo>/pull/<n>` in the summary, else the open PR whose head is the Mapping block's branch. No open PR means no success: it refuses.
+The PR is `--pr <url|number>`, else the first `https://github.com/<owner>/<repo>/pull/<n>` in the summary, else the open PR whose head is the Mapping block's branch. Whatever the source, it then runs `gh pr view <n> -R <owner>/<repo> --json number,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository,url` and refuses the succeeded closeout, naming the mismatch, unless the PR is:
+
+- `OPEN` (not merged, not closed),
+- in `<owner>/<repo>` (a URL of another repo is refused before the lookup),
+- from a head in `<owner>/<repo>` itself (`isCrossRepository` false; a fork's branch of the same name does not count),
+- on the head branch named by the Mapping block's `branch`.
+
+No open PR means no success: it refuses.
+
+The files section is always rendered. A succeeded closeout with no files (an empty `filesModified[]`, or a plain-text summary without `--files`) refuses, even in dry-run; pass `--files a,b`.
 
 **Failure** (`failed`, or Orca reports a failed attempt): with `--apply`, in this order:
 
@@ -234,8 +254,8 @@ scripts/issue-recover.sh --json     # the same as {issues, runs, bound_run, run_
 scripts/issue-recover.sh --apply    # also re-bind the Run
 ```
 
-1. For every repo in `hub.json`: `gh issue list --assignee @me --state open --search "orca-issue-orchestrator in:comments"`, keeping Issues with a real Mapping block.
-2. Read the **latest** block on each Issue (after a retry there are several).
+1. For every repo in `hub.json`: `gh issue list --assignee @me --state open --search "orca-issue-orchestrator in:comments"`, keeping Issues with a trusted Mapping block (see [Which blocks are trusted](#which-blocks-are-trusted)).
+2. Read the **latest** trusted block on each Issue (after a retry there are several).
 3. Reconcile: `orca orchestration worker-list --run <run_id> --json` (all pages) for the row of the block's `dispatchId`, and `orca worktree list --json` for the row whose `identity.key` is the block's `worktree_id` and its `linkedIssue`.
 4. Print `orca orchestration run-use --id <run_id> --json`. `--apply` runs it, and nothing else; it prints but skips it when the terminal is already bound to that Run and refuses when the Issues name more than one Run (bind the one you want by hand).
 
@@ -270,4 +290,4 @@ npx --yes shellcheck skills/orca-issue-orchestrator/scripts/*.sh skills/orca-iss
   skills/orca-issue-orchestrator/tests/bin/gh skills/orca-issue-orchestrator/tests/bin/orca
 ```
 
-The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths; on closeout success one comment and no label or assignee change, on failure the label add, the unassign, and the comment in that order; `gh issue close` and `task-update` never invoked; recovery uses the latest of two Mapping blocks and runs only `run-use`). `tests/helpers.sh` holds the shared setup.
+The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths; on closeout success one comment and no label or assignee change, on failure the label add, the unassign, and the comment in that order; `gh issue close` and `task-update` never invoked; recovery uses the latest of two Mapping blocks and runs only `run-use`; forged Mapping blocks from another author, or with a wrong repo, issue, hub, or version, are ignored by closeout, audit, recovery, and the concurrency count; a `--pr` that is merged, from another repo or a fork, or on another head branch refuses; a succeeded closeout without files refuses). The fake `gh` answers `gh api user` from `user.json` and `gh pr view <n>` from `pr-<owner>_<repo>-<n>.json`. `tests/helpers.sh` holds the shared setup.

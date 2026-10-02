@@ -41,6 +41,8 @@ while [ $# -gt 0 ]; do
 done
 
 hub_load "$hub_arg"
+# Only the authenticated orchestrator's marker comments are trusted.
+gh_login_load
 
 # --- 1. The Issues and their latest Mapping block ----------------------------------
 
@@ -50,7 +52,7 @@ while IFS= read -r repo; do
   issues="$(gh_in_flight "$repo")" || die "cannot list the in-flight Issues of $repo; nothing was done"
   while IFS= read -r issue; do
     [ -n "$issue" ] || continue
-    block="$(mapping_latest "$issue")"
+    block="$(mapping_latest "$issue" "$repo")"
     [ -n "$block" ] || continue
     closed_out=false
     has_marker_comment "$issue" "$CLOSEOUT_MARKER" "\"dispatch_id\":\"$(json_get "$block" '.dispatch_id')\"" &&

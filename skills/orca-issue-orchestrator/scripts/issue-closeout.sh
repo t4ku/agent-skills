@@ -9,7 +9,8 @@
 # <summary-file> is either the `orca orchestration check --json` output that
 # holds the worker_done (heartbeats and other Dispatches are ignored; the
 # Dispatch is the one in the Issue's latest Mapping block), or a plain-text
-# summary the Orchestrator wrote. "-" reads stdin.
+# summary the Orchestrator wrote. "-" reads stdin. Only Mapping blocks posted
+# by the authenticated gh login that name this repo, Issue, and Hub count.
 #
 #   succeeded  Comment the PR link, the summary, and the files modified.
 #              Labels and assignee are untouched.
@@ -19,10 +20,12 @@
 # Either way it prints, and never runs, `worker-release`. It never closes the
 # Issue and never runs `task-update`. Without --apply nothing changes: every
 # gh command that would change state is printed, in order.
-#   --pr        The PR URL (default: the first PR URL of this repo in the
-#               summary, else the open PR whose head is the Mapping branch)
+#   --pr        The PR URL or number (default: the first PR URL of this repo
+#               in the summary, else the open PR whose head is the Mapping
+#               branch). Whatever its source, the PR must be OPEN, in this
+#               repo, and have the Mapping branch as its head.
 #   --files     Files modified, comma-separated (default: the worker_done
-#               payload's filesModified)
+#               payload's filesModified). succeeded needs at least one.
 #   --needs     failed only, required with --apply: what a human must supply
 #   --evidence  failed only: the evidence line (default: where Orca keeps the
 #               Worker's output)
@@ -54,7 +57,7 @@ while [ $# -gt 0 ]; do
     --files) [ $# -ge 2 ] || die "--files needs a list"; files_arg="$2"; shift 2 ;;
     --needs) [ $# -ge 2 ] || die "--needs needs a text"; needs="$2"; shift 2 ;;
     --evidence) [ $# -ge 2 ] || die "--evidence needs a text"; evidence="$2"; shift 2 ;;
-    -h | --help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -?*) die "unknown option: $1" ;;
     *) positional+=("$1"); shift ;;
   esac
@@ -71,6 +74,8 @@ printf '%s' "$number" | grep -Eq '^[1-9][0-9]*$' || die "Issue number must be a 
 case "$outcome" in succeeded | failed) ;; *) die "outcome must be succeeded or failed: $outcome" ;; esac
 
 hub_load "$hub_arg"
+# Only the authenticated orchestrator's marker comments are trusted.
+gh_login_load
 [ -n "$(hub_repo "$repo")" ] || die "$repo is not in $HUB_JSON repos[]"
 
 if [ "$APPLY" -eq 1 ]; then mode="apply"; else mode="dry-run; add --apply to act"; fi
@@ -79,7 +84,7 @@ if [ "$APPLY" -eq 1 ]; then mode="apply"; else mode="dry-run; add --apply to act
 
 issue="$(gh issue view "$number" -R "$repo" --json number,title,state,url,labels,comments)" ||
   die "cannot read $repo#$number"
-block="$(mapping_latest "$issue")"
+block="$(mapping_latest "$issue" "$repo")"
 [ -n "$block" ] || die "$repo#$number has no Mapping comment; nothing to close out"
 dispatch_id="$(json_get "$block" '.dispatch_id')"
 branch="$(json_get "$block" '.branch')"
@@ -136,26 +141,66 @@ fi
 
 closeout_block="$(jq -cn --arg d "$dispatch_id" --arg o "$outcome" '{v: 1, dispatch_id: $d, outcome: $o}')"
 
+# lower <text>: ASCII lowercase (GitHub owner and repo names are case-insensitive).
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# validate_pr <url|number> <source>: resolve the PR with gh pr view and refuse
+# unless it is OPEN, in $repo, and its head is the Mapping branch of $repo
+# itself (not a fork). Sets pr_url to the PR's canonical URL.
+validate_pr() {
+  local ref="$1" src="$2" n pr_repo view state head head_repo cross
+  case "$ref" in
+    https://github.com/*/*/pull/*)
+      pr_repo="$(printf '%s' "$ref" | sed -E 's#^https://github\.com/([^/]+/[^/]+)/pull/.*#\1#')"
+      n="$(printf '%s' "$ref" | sed -E 's#^https://github\.com/[^/]+/[^/]+/pull/([0-9]+).*#\1#')"
+      ;;
+    *) pr_repo="$repo"; n="$ref" ;;
+  esac
+  printf '%s' "$n" | grep -Eq '^[1-9][0-9]*$' || die "the PR ($src) is not a PR URL or number: $ref"
+  [ "$(lower "$pr_repo")" = "$(lower "$repo")" ] ||
+    die "the PR ($src) $ref is in $pr_repo, not $repo; refusing a succeeded closeout"
+  view="$(gh pr view "$n" -R "$repo" --json number,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository,url)" ||
+    die "cannot read PR #$n of $repo ($src); refusing a succeeded closeout"
+  state="$(json_get "$view" '.state')"
+  head="$(json_get "$view" '.headRefName')"
+  head_repo="$(json_get "$view" '"\(.headRepositoryOwner.login // "?")/\(.headRepository.name // "?")"')"
+  cross="$(json_get "$view" '.isCrossRepository | tostring')"
+  pr_url="$(json_get "$view" '.url')"
+  [ "$(lower "$pr_url")" = "$(lower "https://github.com/$repo/pull/$n")" ] ||
+    die "PR #$n of $repo ($src) answers with URL ${pr_url:-none}, not https://github.com/$repo/pull/$n; refusing a succeeded closeout"
+  [ "$state" = "OPEN" ] ||
+    die "PR #$n of $repo ($src) is ${state:-in an unknown state}, not OPEN; success needs an open PR"
+  [ "$cross" = "false" ] && [ "$(lower "$head_repo")" = "$(lower "$repo")" ] ||
+    die "PR #$n of $repo ($src) comes from $head_repo, not $repo; refusing a succeeded closeout"
+  [ -n "$branch" ] && [ "$head" = "$branch" ] ||
+    die "PR #$n of $repo ($src) has head branch '${head:-?}', not the Mapping branch '${branch:-?}'; refusing a succeeded closeout"
+}
+
 if [ "$outcome" = "succeeded" ]; then
-  if [ -z "$pr_url" ]; then
+  [ "$(printf '%s' "$files_json" | jq 'length')" -gt 0 ] ||
+    die "a succeeded closeout needs the files modified: the worker_done has no filesModified (or the summary is plain text); pass --files <a,b,...>"
+  if [ -n "$pr_url" ]; then
+    pr_src="--pr"
+  else
     repo_re="$(printf '%s' "$repo" | sed 's/[.]/\\./g')"
-    pr_url="$(printf '%s\n' "$summary" | grep -Eo "https://github\.com/$repo_re/pull/[0-9]+" | head -1)"
+    pr_url="$(printf '%s\n' "$summary" | grep -Eio "https://github\.com/$repo_re/pull/[0-9]+" | head -1)"
+    pr_src="the summary"
   fi
   if [ -z "$pr_url" ] && [ -n "$branch" ]; then
     prs="$(gh pr list -R "$repo" --head "$branch" --state open --json number,url,state,headRefName)" ||
       die "cannot list the PRs of $repo"
     pr_url="$(json_get "$prs" 'first(.[] | select(.headRefName == $b and .state == "OPEN") | .url)' --arg b "$branch")"
+    pr_src="the open PR from branch $branch"
   fi
   [ -n "$pr_url" ] || die "success needs an open PR: none in the summary, none open from branch ${branch:-?}; pass --pr <url>"
+  validate_pr "$pr_url" "$pr_src"
   body="$(
     printf '%s\n\n' "$DISCLAIMER"
     printf '## Worker report: succeeded\n\n'
     printf 'Pull request: %s\n\n' "$pr_url"
     printf '%s\n' "$summary"
-    if [ "$(printf '%s' "$files_json" | jq 'length')" -gt 0 ]; then
-      printf '\n**Files modified:**\n'
-      printf '%s' "$files_json" | jq -r '.[] | "- `" + . + "`"'
-    fi
+    printf '\n**Files modified:**\n'
+    printf '%s' "$files_json" | jq -r '.[] | "- `" + . + "`"'
     printf '\nWorktree `%s` (branch `%s`) is kept for review.\n\n' "$name" "$branch"
     printf '<!-- %s %s -->\n' "$CLOSEOUT_MARKER" "$closeout_block"
   )"

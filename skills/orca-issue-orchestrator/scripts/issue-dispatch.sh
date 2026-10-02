@@ -55,6 +55,8 @@ printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || die "repo 
 printf '%s' "$number" | grep -Eq '^[1-9][0-9]*$' || die "Issue number must be a positive integer: $number"
 
 hub_load "$hub_arg"
+# Only the authenticated orchestrator's marker comments are trusted.
+gh_login_load
 repo_cfg="$(hub_repo "$repo")"
 [ -n "$repo_cfg" ] || die "$repo is not in $HUB_JSON repos[]; add it there first"
 
@@ -141,7 +143,7 @@ if [ -n "$receipt" ]; then
   print_cmd orca worktree set --worktree "id:$worktree_id" --issue "$number" --json
   printf '\n# Post the Mapping comment\n'
 
-  if json_get "$issue" '.comments[]?.body' | grep -F "$MAPPING_MARKER" | grep -qF "\"dispatch_id\":\"$dispatch_id\""; then
+  if has_marker_comment "$issue" "$MAPPING_MARKER" "\"dispatch_id\":\"$dispatch_id\""; then
     printf 'A Mapping comment for Dispatch %s is already on the Issue; not posting again.\n' "$dispatch_id"
     exit 0
   fi

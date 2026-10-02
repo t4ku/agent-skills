@@ -58,8 +58,17 @@ case "${1:-} ${2:-}" in
   "pr list")
     fixture "prs-$(repo_key "$(value_of -R "$@")").json"
     ;;
+  "pr view")
+    fixture "pr-$(repo_key "$(value_of -R "$@")")-$3.json"
+    ;;
   "repo view")
     fixture "repo-$(repo_key "$3").json"
+    ;;
+  "api user")
+    # gh api user [--jq <filter>] -> user.json
+    filter="$(value_of --jq "$@")"
+    user="$(fixture user.json)" || exit 1
+    printf '%s' "$user" | jq -r "${filter:-.}"
     ;;
   "api "*)
     # gh api [--paginate] repos/<owner>/<repo>/issues?... -> issues-<owner>_<repo>.json

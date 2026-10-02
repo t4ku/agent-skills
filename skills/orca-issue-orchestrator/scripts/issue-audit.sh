@@ -33,6 +33,8 @@ while [ $# -gt 0 ]; do
 done
 
 hub_load "$hub_arg"
+# Only the authenticated orchestrator's marker comments are trusted.
+gh_login_load
 
 found=0
 while IFS= read -r repo; do
