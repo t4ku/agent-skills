@@ -413,18 +413,36 @@ orca_worktree() {
 }
 
 # orca_workers <run-id>: every worker-list row of the Run as one JSON array,
-# following page.nextCursor. Returns 1 when worker-list fails.
+# following page.nextCursor. Returns 1, with the reason on stderr, when
+# worker-list fails, answers anything but {ok: true} with result.workers[] and
+# result.page, says hasMore without a nextCursor, or has more pages than
+# ORCA_WORKER_PAGES_MAX (default 1000): a partial list must not pass for all.
 orca_workers() {
-  local acc='[]' cursor="" page
+  local acc='[]' cursor="" page pages=0 max="${ORCA_WORKER_PAGES_MAX:-1000}"
+  printf '%s' "$max" | grep -Eq '^[1-9][0-9]*$' || max=1000
   while :; do
+    pages=$((pages + 1))
+    if [ "$pages" -gt "$max" ]; then
+      printf 'worker-list --run %s: still hasMore after %s pages; giving up\n' "$1" "$max" >&2
+      return 1
+    fi
     if [ -n "$cursor" ]; then
       page="$(orca orchestration worker-list --run "$1" --limit 100 --cursor "$cursor" --json)" || return 1
     else
       page="$(orca orchestration worker-list --run "$1" --limit 100 --json)" || return 1
     fi
-    acc="$(printf '%s' "$page" | jq -c --argjson acc "$acc" '$acc + (.result.workers // [])')" || return 1
-    cursor="$(json_get "$page" 'select(.result.page.hasMore == true) | .result.page.nextCursor')"
-    [ -n "$cursor" ] || break
+    if ! printf '%s' "$page" | jq -e '.ok == true and (.result.workers | type) == "array"
+        and (.result.page | type) == "object"' > /dev/null 2>&1; then
+      printf 'worker-list --run %s answered no {ok: true} page of workers:\n%s\n' "$1" "$page" >&2
+      return 1
+    fi
+    acc="$(printf '%s' "$page" | jq -c --argjson acc "$acc" '$acc + .result.workers')" || return 1
+    printf '%s' "$page" | jq -e '.result.page.hasMore == true' > /dev/null || break
+    cursor="$(json_get "$page" '.result.page.nextCursor | strings')"
+    if [ -z "$cursor" ]; then
+      printf 'worker-list --run %s: page %s says hasMore with no nextCursor; giving up\n' "$1" "$pages" >&2
+      return 1
+    fi
   done
   printf '%s\n' "$acc"
 }

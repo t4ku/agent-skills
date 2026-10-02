@@ -94,8 +94,12 @@ done <<EOF_RUNS
 $(printf '%s' "$runs" | jq -r '.[]')
 EOF_RUNS
 wt_list="$(orca worktree list --json)" || die "orca worktree list failed; nothing was done"
-worktrees="$(printf '%s' "$wt_list" | jq -c '.result.worktrees // []')" && [ -n "$worktrees" ] ||
-  die "orca worktree list returned no JSON; nothing was done"
+# An error or malformed envelope must not pass for "no worktrees" (every one missing).
+worktrees="$(printf '%s' "$wt_list" | jq -c 'select(.ok == true and (.result.worktrees | type) == "array")
+  | .result.worktrees' 2> /dev/null)" && [ -n "$worktrees" ] || {
+  printf '%s\n' "$wt_list" >&2
+  die "orca worktree list answered no {ok: true} list of worktrees (above); nothing was done"
+}
 
 closeout="$SCRIPT_DIR/issue-closeout.sh"
 audit="$SCRIPT_DIR/issue-audit.sh"

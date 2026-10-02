@@ -108,6 +108,21 @@ check "--pr from a fork: names the head repository" out_has "forker"
 check "--pr from a fork: posts nothing" no_mutation
 
 reset_fakes
+jq '.baseRefName = "release/1.x"' "$FIXTURES/pr-example_app-40.json" > "$OVR/pr-example_app-40.json"
+run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary.txt" --hub "$HUB" --apply --files src/reset.ts --pr 40
+check "--pr on a non-default base: refuses" code_is 1
+check "--pr on a non-default base: names both branches" \
+  bash -c 'printf "%s" "$1" | grep -qF "$2" && printf "%s" "$1" | grep -qF "$3"' _ "$OUT" "'release/1.x'" "default branch 'main'"
+check "--pr on a non-default base: posts nothing" no_mutation
+
+reset_fakes
+touch "$OVR/repo-example_app.json.fail"
+run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary.txt" --hub "$HUB" --apply --files src/reset.ts --pr 40
+check "default branch unreadable: refuses" code_is 1
+check "default branch unreadable: says so" out_has "cannot read the default branch of example/app"
+check "default branch unreadable: posts nothing" no_mutation
+
+reset_fakes
 run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary.txt" --hub "$HUB" --apply --files src/reset.ts \
   --pr https://github.com/other/app/pull/40
 check "--pr in another repo: refuses" code_is 1

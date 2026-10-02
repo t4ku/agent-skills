@@ -115,6 +115,29 @@ check "worktree list fails: binds nothing" no_mutation
 
 reset_fakes
 in_flight_two
+echo '{"ok": false, "error": {"code": "runtime_unavailable", "message": "Orca is not running"}}' > "$OVR/orca-worktree-list.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "worktree list error envelope: refuses" code_is 1
+check "worktree list error envelope: binds nothing" no_mutation
+check "worktree list error envelope: shows the error" out_has "runtime_unavailable"
+check "worktree list error envelope: never reports a worktree missing" out_lacks "missing"
+
+reset_fakes
+in_flight_two
+echo '{"ok": true, "result": {"totalCount": 0}}' > "$OVR/orca-worktree-list.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "worktree list without worktrees[]: refuses" code_is 1
+check "worktree list without worktrees[]: binds nothing" no_mutation
+
+reset_fakes
+in_flight_two
+echo 'not json' > "$OVR/orca-worktree-list.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "worktree list not JSON: refuses" code_is 1
+check "worktree list not JSON: binds nothing" no_mutation
+
+reset_fakes
+in_flight_two
 touch "$OVR/orca-worker-list-run_test12.json.fail"
 run "$RECOVER" --hub "$HUB" --apply
 check "worker-list fails: refuses" code_is 1
@@ -128,6 +151,49 @@ touch "$OVR/orca-worker-list-run_test12.json.fail"
 run "$RECOVER" --hub "$HUB" --json
 check "worker-list fails, --json: refuses" code_is 1
 check "worker-list fails, --json: prints no report" out_lacks '"issues"'
+
+reset_fakes
+in_flight_two
+echo '{"ok": false, "error": {"code": "run_not_found", "message": "no such Run"}}' > "$OVR/orca-worker-list-run_test12.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "worker-list error envelope: refuses" code_is 1
+check "worker-list error envelope: binds nothing" no_mutation
+check "worker-list error envelope: shows the error" out_has "run_not_found"
+check "worker-list error envelope: never reports the Issues as unknown" out_lacks "unknown"
+
+reset_fakes
+in_flight_two
+jq '.result.workers = null' "$FIXTURES/orca-worker-list-run_test12.json" > "$OVR/orca-worker-list-run_test12.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "worker-list without workers[]: refuses" code_is 1
+check "worker-list without workers[]: binds nothing" no_mutation
+
+reset_fakes
+in_flight_two
+jq 'del(.result.page)' "$FIXTURES/orca-worker-list-run_test12.json" > "$OVR/orca-worker-list-run_test12.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "worker-list without page: refuses" code_is 1
+check "worker-list without page: binds nothing" no_mutation
+
+reset_fakes
+in_flight_two
+jq '.result.page.hasMore = true | .result.page.nextCursor = null' \
+  "$FIXTURES/orca-worker-list-run_test12.json" > "$OVR/orca-worker-list-run_test12.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "worker-list hasMore without cursor: refuses" code_is 1
+check "worker-list hasMore without cursor: binds nothing" no_mutation
+check "worker-list hasMore without cursor: says so" out_has "nextCursor"
+
+reset_fakes
+in_flight_two
+jq '.result.page.hasMore = true | .result.page.nextCursor = "c1"' \
+  "$FIXTURES/orca-worker-list-run_test12.json" > "$OVR/orca-worker-list-run_test12.json"
+ORCA_WORKER_PAGES_MAX=3 run "$RECOVER" --hub "$HUB" --apply
+check "worker-list never ends: refuses at the page cap" code_is 1
+check "worker-list never ends: binds nothing" no_mutation
+check "worker-list never ends: names the cap" out_has "after 3 pages"
+check "worker-list never ends: stops at the cap" \
+  bash -c '[ "$(calls | grep -c "^orca orchestration worker-list")" -eq 3 ]'
 
 reset_fakes
 jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\",\"hub\":\"example-hub\"} -->"}]' \

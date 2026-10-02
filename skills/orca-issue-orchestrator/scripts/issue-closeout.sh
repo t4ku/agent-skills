@@ -168,11 +168,12 @@ closeout_block="$(jq -cn --arg d "$dispatch_id" --arg o "$outcome" --arg hub "$(
 
 # validate_pr <url|number> <source>: resolve the PR with gh pr view and refuse
 # unless it is OPEN, in $repo, its head is the Mapping $branch of $repo
-# itself (not a fork), and the first non-empty line of its body closes this
+# itself (not a fork), its base is the repo's default branch (closing
+# keywords act only there), and the first non-empty line of its body closes this
 # Issue (`Closes #<n>`; any GitHub closing keyword, any case). Reads $repo,
 # $number, and $branch; sets pr_url to the PR's canonical URL.
 validate_pr() {
-  local ref="$1" src="$2" n pr_repo view state head head_repo cross first_line
+  local ref="$1" src="$2" n pr_repo view state head base default_branch head_repo cross first_line
   case "$ref" in
     https://github.com/*/*/pull/*)
       pr_repo="$(printf '%s' "$ref" | sed -E 's#^https://github\.com/([^/]+/[^/]+)/pull/.*#\1#')"
@@ -183,10 +184,11 @@ validate_pr() {
   printf '%s' "$n" | grep -Eq '^[1-9][0-9]*$' || die "the PR ($src) is not a PR URL or number: $ref"
   [ "$(lower "$pr_repo")" = "$(lower "$repo")" ] ||
     die "the PR ($src) $ref is in $pr_repo, not $repo; refusing a succeeded closeout"
-  view="$(gh pr view "$n" -R "$repo" --json number,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository,url,body)" ||
+  view="$(gh pr view "$n" -R "$repo" --json number,state,headRefName,baseRefName,headRepository,headRepositoryOwner,isCrossRepository,url,body)" ||
     die "cannot read PR #$n of $repo ($src); refusing a succeeded closeout"
   state="$(json_get "$view" '.state')"
   head="$(json_get "$view" '.headRefName')"
+  base="$(json_get "$view" '.baseRefName')"
   head_repo="$(json_get "$view" '"\(.headRepositoryOwner.login // "?")/\(.headRepository.name // "?")"')"
   cross="$(json_get "$view" '.isCrossRepository | tostring')"
   pr_url="$(json_get "$view" '.url')"
@@ -198,6 +200,12 @@ validate_pr() {
     die "PR #$n of $repo ($src) comes from $head_repo, not $repo; refusing a succeeded closeout"
   [ -n "$branch" ] && [ "$head" = "$branch" ] ||
     die "PR #$n of $repo ($src) has head branch '${head:-?}', not the Mapping branch '${branch:-?}'; refusing a succeeded closeout"
+  # GitHub closes the Issue only on a merge into the default branch, and
+  # issue-audit.sh skips any other merge.
+  default_branch="$(gh_default_branch "$repo")" && [ -n "$default_branch" ] ||
+    die "cannot read the default branch of $repo; refusing a succeeded closeout"
+  [ "$base" = "$default_branch" ] ||
+    die "PR #$n of $repo ($src) targets base branch '${base:-?}', not the default branch '$default_branch'; its merge would not close the Issue; refusing a succeeded closeout"
   # The same keywords issue-audit.sh looks for, but only on the first line.
   first_line="$(json_get "$view" '.body // "" | split("\n") | map(select(test("\\S"))) | first // ""')"
   printf '%s' "$first_line" | jq -Rse --arg n "$number" \
