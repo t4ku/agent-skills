@@ -1,0 +1,32 @@
+{
+  "number": 12,
+  "title": "Add password reset",
+  "state": "OPEN",
+  "url": "https://github.com/example/app/issues/12",
+  "assignees": [
+    {
+      "login": "orchestrator"
+    }
+  ],
+  "body": "## What to build\n\nA password reset flow.",
+  "comments": [
+    {
+      "author": {
+        "login": "orchestrator"
+      },
+      "body": "> *Posted by an AI orchestrator.*\n\nDispatched to an Orca worker.\n- Worktree: `issue-12-add-password-reset` (branch `issue-12-add-password-reset`, base `main`)\n- Run `run_test12` / Task `task_test12` / Dispatch `ctx_old12`\n\n<!-- orca-issue-orchestrator {\"v\":1,\"repo\":\"example/app\",\"issue\":12,\"run_id\":\"run_test12\",\"task_id\":\"task_test12\",\"dispatch_id\":\"ctx_old12\",\"worktree_id\":\"wt2:local:inst-12\",\"branch\":\"issue-12-add-password-reset\",\"hub\":\"example-hub\"} -->"
+    },
+    {
+      "author": {
+        "login": "someone"
+      },
+      "body": "Mentioning orca-issue-orchestrator in passing."
+    },
+    {
+      "author": {
+        "login": "orchestrator"
+      },
+      "body": "> *Posted by an AI orchestrator.*\n\nDispatched to an Orca worker.\n- Worktree: `issue-12-add-password-reset` (branch `issue-12-add-password-reset`, base `main`)\n- Run `run_test12` / Task `task_test12` / Dispatch `ctx_test12`\n\n<!-- orca-issue-orchestrator {\"v\":1,\"repo\":\"example/app\",\"issue\":12,\"run_id\":\"run_test12\",\"task_id\":\"task_test12\",\"dispatch_id\":\"ctx_test12\",\"worktree_id\":\"wt2:local:inst-12\",\"branch\":\"issue-12-add-password-reset\",\"hub\":\"example-hub\"} -->"
+    }
+  ]
+}

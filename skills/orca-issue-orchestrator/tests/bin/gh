@@ -52,6 +52,9 @@ case "${1:-} ${2:-}" in
     fi
     printf 'https://github.com/%s/issues/%s#issuecomment-1\n' "$(value_of -R "$@")" "$3"
     ;;
+  "pr list")
+    fixture "prs-$(repo_key "$(value_of -R "$@")").json"
+    ;;
   "repo view")
     fixture "repo-$(repo_key "$3").json"
     ;;

@@ -85,6 +85,17 @@ print_cmd() {
   printf '%s\n' "$out"
 }
 
+# print_cmd_json <JSON array of words>: print_cmd for an argv held as JSON.
+print_cmd_json() {
+  local words=() word
+  while IFS= read -r word; do
+    words+=("$word")
+  done <<EOF_WORDS
+$(printf '%s' "$1" | jq -r '.[]')
+EOF_WORDS
+  print_cmd "${words[@]}"
+}
+
 # mutate <argv...>: print the command; run it only under --apply, capturing
 # its stdout in MUTATE_OUT. Returns the command's status (0 in dry-run).
 mutate() {
@@ -102,25 +113,69 @@ gh_default_branch() {
   gh repo view "$1" --json defaultBranchRef | jq -r '.defaultBranchRef.name // empty'
 }
 
-# gh_in_flight_count: open Issues assigned to @me that carry the Mapping marker,
-# summed over every repo in hub.json. Prints nothing and returns 1 on failure;
-# callers must treat that as a refusal (it runs in a command substitution).
+# gh_in_flight <owner/repo>: JSON array of the open Issues assigned to @me
+# that carry a Mapping block, as {number, title, url, comments}. Returns 1 when
+# gh fails or answers with something that is not a JSON array.
+gh_in_flight() {
+  local list
+  list="$(gh issue list -R "$1" --assignee @me --state open \
+    --search "$MAPPING_MARKER in:comments" --json number,title,url,comments --limit 100)" || return 1
+  # The search also hits comments that merely mention the marker; keep only
+  # Issues with a real Mapping block.
+  printf '%s' "$list" | jq -ce --arg m "<!-- $MAPPING_MARKER {" \
+    'if type == "array" then map(select(any(.comments[]?; .body | contains($m)))) else error("not an array") end' \
+    2> /dev/null || return 1
+}
+
+# gh_in_flight_count: gh_in_flight summed over every repo in hub.json. Prints
+# nothing and returns 1 on failure; callers must treat that as a refusal (it
+# runs in a command substitution).
 gh_in_flight_count() {
-  local repo total=0 list n
+  local repo total=0 n
   while IFS= read -r repo; do
     [ -n "$repo" ] || continue
-    list="$(gh issue list -R "$repo" --assignee @me --state open \
-      --search "$MAPPING_MARKER in:comments" --json number,comments --limit 100)" || return 1
-    # The search also hits comments that merely mention the marker; count only
-    # Issues with a real Mapping block.
-    n="$(printf '%s' "$list" |
-      jq --arg m "<!-- $MAPPING_MARKER {" 'map(select(any(.comments[]?; .body | contains($m)))) | length')" || return 1
+    n="$(gh_in_flight "$repo" | jq 'length')" || return 1
     case "$n" in '' | *[!0-9]*) return 1 ;; esac
     total=$((total + n))
   done <<EOF_REPOS
 $(hub_repos)
 EOF_REPOS
   printf '%s\n' "$total"
+}
+
+# --- Mapping comment ------------------------------------------------------------
+
+# mapping_latest <json with .comments[]>: the last Mapping block in comment
+# order, as compact JSON; empty when there is none. After a retry an Issue has
+# several blocks; the latest is current.
+mapping_latest() {
+  printf '%s' "$1" | jq -c --arg m "$MAPPING_MARKER" '
+    [.comments[]?.body // empty
+      | scan("<!-- " + $m + " (\\{.*?\\}) -->") | .[0]
+      | (try fromjson catch empty) | select(type == "object")]
+    | last // empty'
+}
+
+# has_local_path <text>: true when the text holds the Hub folder path, its
+# hub.json hub_path, the home directory, or a <repo-id>::/<path> worktree id.
+# Public comments must never carry one.
+has_local_path() {
+  local hub_path
+  hub_path="$(hub_get '.hub_path // empty')"
+  case "$1" in
+    *::/* | *"$HUB_DIR"* | *"${hub_path:-$HUB_DIR}"* | *"${HOME:-$HUB_DIR}"*) return 0 ;;
+  esac
+  return 1
+}
+
+# read_input <file|->: print a file, or stdin for "-".
+read_input() {
+  if [ "$1" = "-" ]; then
+    cat
+  else
+    [ -f "$1" ] || die "no such file: $1"
+    cat "$1"
+  fi
 }
 
 # --- orca -----------------------------------------------------------------------
@@ -143,6 +198,23 @@ orca_bound_run() {
 # orca_worktree <worktree-id>: the worktree list row as compact JSON, empty if absent.
 orca_worktree() {
   orca worktree list --json | jq -c --arg id "$1" 'first(.result.worktrees[]? | select(.id == $id)) // empty'
+}
+
+# orca_workers <run-id>: every worker-list row of the Run as one JSON array,
+# following page.nextCursor. Returns 1 when worker-list fails.
+orca_workers() {
+  local acc='[]' cursor="" page
+  while :; do
+    if [ -n "$cursor" ]; then
+      page="$(orca orchestration worker-list --run "$1" --limit 100 --cursor "$cursor" --json)" || return 1
+    else
+      page="$(orca orchestration worker-list --run "$1" --limit 100 --json)" || return 1
+    fi
+    acc="$(printf '%s' "$page" | jq -c --argjson acc "$acc" '$acc + (.result.workers // [])')" || return 1
+    cursor="$(json_get "$page" 'select(.result.page.hasMore == true) | .result.page.nextCursor')"
+    [ -n "$cursor" ] || break
+  done
+  printf '%s\n' "$acc"
 }
 
 # --- naming -----------------------------------------------------------------------

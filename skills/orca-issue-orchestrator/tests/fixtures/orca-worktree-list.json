@@ -1,4 +1,5 @@
-{"ok": true, "result": {"totalCount": 2, "truncated": false, "worktrees": [
+{"ok": true, "result": {"totalCount": 3, "truncated": false, "worktrees": [
   {"id": "repo-app-id::/path/to/app", "identity": {"key": "wt2:local:inst-main"}, "repoId": "repo-app-id", "branch": "refs/heads/main", "linkedIssue": null},
-  {"id": "repo-app-id::/path/to/worktrees/issue-7-add-login-page", "identity": {"key": "wt2:local:inst-7"}, "repoId": "repo-app-id", "branch": "refs/heads/issue-7-add-login-page", "linkedIssue": null}
+  {"id": "repo-app-id::/path/to/worktrees/issue-7-add-login-page", "identity": {"key": "wt2:local:inst-7"}, "repoId": "repo-app-id", "branch": "refs/heads/issue-7-add-login-page", "linkedIssue": null},
+  {"id": "repo-app-id::/path/to/worktrees/issue-12-add-password-reset", "identity": {"key": "wt2:local:inst-12"}, "repoId": "repo-app-id", "branch": "refs/heads/issue-12-add-password-reset", "linkedIssue": 12}
 ]}}

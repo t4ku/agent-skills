@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "result": {
+    "messages": [
+      {
+        "id": "msg_5",
+        "type": "heartbeat",
+        "body": "",
+        "payload": "{\"taskId\":\"task_test12\",\"dispatchId\":\"ctx_test12\",\"phase\":\"implementing\"}"
+      },
+      {
+        "id": "msg_6",
+        "type": "worker_done",
+        "subject": "blocked",
+        "body": "Tried to add the reset flow. The mail provider is not named in the Issue. No PR was opened.",
+        "payload": "{\"taskId\":\"task_test12\",\"dispatchId\":\"ctx_test12\",\"outcome\":\"failed\",\"filesModified\":[],\"reportPath\":\"/tmp/report-12.md\"}"
+      }
+    ]
+  }
+}

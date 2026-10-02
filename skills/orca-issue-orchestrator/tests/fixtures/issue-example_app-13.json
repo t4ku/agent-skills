@@ -1,0 +1,20 @@
+{
+  "number": 13,
+  "title": "Export audit log",
+  "state": "OPEN",
+  "url": "https://github.com/example/app/issues/13",
+  "assignees": [
+    {
+      "login": "orchestrator"
+    }
+  ],
+  "body": "Export the audit log as CSV.",
+  "comments": [
+    {
+      "author": {
+        "login": "orchestrator"
+      },
+      "body": "> *Posted by an AI orchestrator.*\n\nDispatched to an Orca worker.\n\n<!-- orca-issue-orchestrator {\"v\":1,\"repo\":\"example/app\",\"issue\":13,\"run_id\":\"run_test12\",\"task_id\":\"task_test13\",\"dispatch_id\":\"ctx_test13\",\"worktree_id\":\"wt2:local:inst-13\",\"branch\":\"issue-13-export-audit-log\",\"hub\":\"example-hub\"} -->"
+    }
+  ]
+}

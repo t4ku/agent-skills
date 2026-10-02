@@ -17,11 +17,25 @@ fixture() {
   fi
 }
 
+# value_of <flag> <args...>: the argument after <flag>.
+value_of() {
+  local flag="$1"
+  shift
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "$flag" ]; then
+      printf '%s' "${2:-}"
+      return
+    fi
+    shift
+  done
+}
+
 case "${1:-} ${2:-}" in
   "repo list") fixture orca-repo-list.json ;;
   "worktree list") fixture orca-worktree-list.json ;;
   "orchestration run-current") fixture orca-run-current.json ;;
   "orchestration task-create") fixture orca-task-create.json ;;
+  "orchestration worker-list") fixture "orca-worker-list-$(value_of --run "$@").json" ;;
   *)
     # Mutations the scripts must never run (worker-start, worktree set, ...).
     printf '{"ok":true,"result":{}}\n'

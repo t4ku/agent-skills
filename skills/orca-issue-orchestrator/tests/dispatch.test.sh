@@ -14,94 +14,10 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPTS="$SCRIPT_DIR/../scripts"
+# shellcheck source=helpers.sh disable=SC1091
+. "$SCRIPT_DIR/helpers.sh"
 FRONTIER="$SCRIPTS/frontier.sh"
 DISPATCH="$SCRIPTS/issue-dispatch.sh"
-FIXTURES="$SCRIPT_DIR/fixtures"
-
-pass=0
-fail=0
-
-# --- fixtures ---------------------------------------------------------------
-
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-WORK="$(cd "$WORK" && pwd -P)"
-
-HUB="$WORK/hub"
-mkdir -p "$HUB/.orca-hub"
-jq -n --arg hub "$HUB" '{
-  hub_id: "example-hub",
-  hub_path: $hub,
-  concurrency: 1,
-  repos: [
-    {name: "example/app"},
-    {name: "example/api", base_branch: "develop",
-     constraints: ["Run the full test suite before opening the PR."]}
-  ]
-}' > "$HUB/.orca-hub/hub.json"
-
-export PATH="$SCRIPT_DIR/bin:$PATH"
-export FAKE_FIXTURES="$FIXTURES"
-export FAKE_LOG="$WORK/calls.log"
-
-# Per-test overrides of single fixtures.
-OVR="$WORK/overrides"
-
-# --- helpers ----------------------------------------------------------------
-
-reset_fakes() {
-  : > "$FAKE_LOG"
-  rm -f "$FAKE_LOG.comment"
-  rm -rf "$OVR"
-  mkdir -p "$OVR"
-  export FAKE_OVERRIDES="$OVR"
-}
-
-# run <script> <args...>  -> sets OUT (stdout+stderr) and CODE
-run() {
-  OUT="$(cd "$HUB" && bash "$@" 2>&1)"
-  CODE=$?
-}
-
-# run_stdin <file> <script> <args...>
-run_stdin() {
-  local input="$1"
-  shift
-  OUT="$(cd "$HUB" && bash "$@" < "$input" 2>&1)"
-  CODE=$?
-}
-
-ok() { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-fail_case() { fail=$((fail + 1)); printf 'FAIL %s\n     %s\n' "$1" "$2"; }
-
-# check <name> <condition command...>
-check() {
-  local name="$1"
-  shift
-  if "$@"; then ok "$name"; else fail_case "$name" "output was:
-$OUT"; fi
-}
-
-out_has() { printf '%s\n' "$OUT" | grep -qF -- "$1"; }
-out_has_line() { printf '%s\n' "$OUT" | grep -qxF -- "$1"; }
-out_lacks() { ! out_has "$1"; }
-code_is() { [ "$CODE" -eq "$1" ]; }
-
-# line_no <exact line>: first line number of an exact line in OUT.
-line_no() { printf '%s\n' "$OUT" | grep -nxF -- "$1" | head -1 | cut -d: -f1; }
-
-# The log as one line per call, argv joined by spaces (newlines escaped).
-calls() { jq -r 'map(gsub("\n"; "\\n")) | join(" ")' "$FAKE_LOG"; }
-
-# Calls that change GitHub or Orca state.
-MUTATION_RE='^(gh issue (edit|comment|close|create|delete|reopen)|gh pr |gh label |orca orchestration (task-create|task-update|worker-start|worker-release|run-create|run-use|dispatch|send)|orca worktree (set|create|rm)|orca terminal )'
-
-no_mutation() { ! calls | grep -Eq "$MUTATION_RE"; }
-# call_line <prefix>: line number of the first call starting with <prefix>.
-call_line() { calls | awk -v p="$1" 'index($0, p) == 1 { print NR; exit }'; }
-called() { [ -n "$(call_line "$1")" ]; }
-not_called() { ! called "$1"; }
 
 # --- frontier.sh --------------------------------------------------------------
 
@@ -277,8 +193,7 @@ block_is() {
   }' >/dev/null
 }
 check "receipt apply: the JSON block has every field" block_is
-no_abs_path() { ! grep -Eq '(^|[^A-Za-z0-9_.-])/(path|Users|home|tmp|private|var)/|::/' "$FAKE_LOG.comment" && ! grep -qF "$HUB" "$FAKE_LOG.comment"; }
-check "receipt apply: the comment has no absolute path" no_abs_path
+check "receipt apply: the comment has no absolute path" no_abs_path "$FAKE_LOG.comment"
 human_lines() {
   grep -qxF -- '- Worktree: `issue-7-add-login-page` (branch `issue-7-add-login-page`, base `main`)' "$FAKE_LOG.comment" &&
     grep -qxF -- '- Run `run_test1` / Task `task_test1` / Dispatch `ctx_test1`' "$FAKE_LOG.comment"
@@ -314,5 +229,4 @@ check "other failure: posts no comment" no_mutation
 
 # --- summary ------------------------------------------------------------------
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+summary

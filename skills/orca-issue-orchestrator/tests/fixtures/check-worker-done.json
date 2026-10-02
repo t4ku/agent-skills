@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "result": {
+    "acknowledged": false,
+    "count": 3,
+    "runId": "run_test12",
+    "messages": [
+      {
+        "id": "msg_1",
+        "type": "heartbeat",
+        "subject": "alive",
+        "body": "",
+        "payload": "{\"taskId\":\"task_test12\",\"dispatchId\":\"ctx_test12\",\"phase\":\"implementing\"}"
+      },
+      {
+        "id": "msg_2",
+        "type": "worker_done",
+        "subject": "done",
+        "body": "Another Issue entirely.",
+        "payload": "{\"taskId\":\"task_other\",\"dispatchId\":\"ctx_other\",\"outcome\":\"succeeded\",\"filesModified\":[\"other.txt\"]}"
+      },
+      {
+        "id": "msg_3",
+        "type": "worker_done",
+        "subject": "PR open",
+        "body": "Added the password reset flow and its mail template. Opened https://github.com/example/app/pull/40 with the tests passing. Nothing is left.",
+        "payload": "{\"taskId\":\"task_test12\",\"dispatchId\":\"ctx_test12\",\"outcome\":\"succeeded\",\"filesModified\":[\"src/reset.ts\",\"src/reset.test.ts\"]}"
+      },
+      {
+        "id": "msg_4",
+        "type": "heartbeat",
+        "subject": "alive",
+        "body": "",
+        "payload": "{\"taskId\":\"task_test12\",\"dispatchId\":\"ctx_test12\",\"phase\":\"reviewing\"}"
+      }
+    ]
+  }
+}

@@ -134,11 +134,7 @@ if [ -n "$receipt" ]; then
   [ -n "$worktree_key" ] && [ -n "$branch" ] || die "worktree $worktree_id has no identity key or branch"
 
   body="$(mapping_comment "$run_id" "$task_id" "$dispatch_id" "$worktree_key" "$branch")"
-  hub_path="$(hub_get '.hub_path // empty')"
-  case "$body" in
-    *::/* | *"$HUB_DIR"* | *"${hub_path:-$HUB_DIR}"* | *"${HOME:-$HUB_DIR}"*)
-      die "refusing to post: the Mapping comment would contain a local path" ;;
-  esac
+  has_local_path "$body" && die "refusing to post: the Mapping comment would contain a local path"
 
   printf 'Mapping for %s#%s (%s):\n\n' "$repo" "$number" "$mode"
   printf '# Link the worktree to the Issue in Orca (run it yourself; this script never does)\n'

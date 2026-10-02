@@ -9,7 +9,7 @@ Every write goes through an Orchestrator command. Each one prints what it would 
 - Claim (assign `@me`) before any other write on an Issue.
 - Every comment starts with `> *Posted by an AI orchestrator.*`
 - Public comments carry the `hub_id`, never a local path.
-- Never close an Issue, merge a PR, or push. GitHub may not link `Closes #123` from the PR body (it has happened: `closingIssuesReferences` stayed empty), so never assume the Issue closes on merge; a human checks.
+- Never close an Issue, merge a PR, or push. GitHub may not link `Closes #123` from the PR body (it has happened: `closingIssuesReferences` stayed empty), so never assume the Issue closes on merge; `scripts/issue-audit.sh` finds the leftovers and a human closes them.
 - Never run `task-update --status completed`; a valid `worker_done` settles the Task.
 - Workers never write to Issues; their only GitHub write is `gh pr create`.
 
@@ -142,28 +142,131 @@ The marker `orca-issue-orchestrator` is how recovery and the concurrency count f
 
 ## Closeout
 
-<!-- Filled by the issue-closeout ticket: success (PR open) and failure comments, assignee / needs-info on failure, worker-release, worktree kept, no automatic retry. -->
+When a `worker_done` for the Dispatch in an Issue's latest Mapping block arrives, write the outcome back with `scripts/issue-closeout.sh`. Feed it the `check --json` batch that holds the `worker_done` (or a plain-text summary you wrote):
 
-*To be written with `scripts/issue-closeout.sh`.*
+```sh
+orca orchestration check --json | scripts/issue-closeout.sh <owner>/<repo> 123 succeeded -            # preview
+orca orchestration check --json | scripts/issue-closeout.sh <owner>/<repo> 123 succeeded - --apply    # act
+orca orchestration check --json | scripts/issue-closeout.sh <owner>/<repo> 123 failed - \
+  --needs "<what a human must supply>" --apply
+```
+
+`check` replays the same batch until you `--ack` it, so preview and apply see the same messages; acknowledge only after the closeout. The Guard denies `>`, so to keep a batch use the Write tool under `tmp/` and pass the file instead of `-`.
+
+From a batch it takes the last message with `type == "worker_done"` whose `.payload | fromjson` has the `dispatchId` of the Issue's latest Mapping block; heartbeats and other Dispatches in the same batch are ignored. The summary is the message `.body`; `filesModified[]` and `reportPath` come from the payload. If the payload's `outcome` differs from the argument, or the batch has no `worker_done` for that Dispatch, it refuses. With a plain-text file, pass `--files a,b` for the files modified. `-` reads stdin.
+
+**Success** (`succeeded`, the PR is open): one comment, nothing else. Labels and assignee stay as they are; the assignee keeps the Issue out of the Frontier until the PR merges.
+
+```
+> *Posted by an AI orchestrator.*
+
+## Worker report: succeeded
+
+Pull request: https://github.com/<owner>/<repo>/pull/456
+
+<the three-sentence summary>
+
+**Files modified:**
+- `<file>`
+
+Worktree `issue-123-<slug>` (branch `<branch>`) is kept for review.
+
+<!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"succeeded"} -->
+```
+
+The PR is `--pr <url>`, else the first `https://github.com/<owner>/<repo>/pull/<n>` in the summary, else the open PR whose head is the Mapping block's branch. No open PR means no success: it refuses.
+
+**Failure** (`failed`, or Orca reports a failed attempt): with `--apply`, in this order:
+
+1. `gh issue edit 123 -R <owner>/<repo> --add-label needs-info --remove-label ready-for-agent` (label first, so a failed unassign cannot put the Issue back in the Frontier)
+2. `gh issue edit 123 -R <owner>/<repo> --remove-assignee @me`
+3. `gh issue comment 123 -R <owner>/<repo> --body-file -` with the failed report:
+
+```
+> *Posted by an AI orchestrator.*
+
+## Worker report: failed
+
+**What was attempted:** <the summary>
+
+**Evidence:** <--evidence, else where Orca keeps the Worker's output (worker-read --dispatch)>
+
+**What is needed from a human:** <--needs, required with --apply>
+
+Worktree `issue-123-<slug>` (branch `<branch>`) is kept for inspection.
+
+<!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"failed"} -->
+```
+
+Write `--needs` yourself from the report: the information missing from the Issue, or the decision a human must take. `reportPath` is a local path and is never posted. There is no automatic retry; the Issue returns to the Frontier when a human answers and restores `ready-for-agent`.
+
+Both paths:
+
+- Print, never run, `orca orchestration worker-release --dispatch <dispatch_id> --json`. Run it after the comment is posted. It exits 0 even when the resource stays `external` / `retained` (a terminal created by an earlier failed attempt); read the state it reports, it is not a failure. The worktree is kept.
+- Never run `gh issue close` or `task-update`.
+- Refuse to post a body holding the Hub folder path, your home directory, or a `::/` worktree path.
+- Post once per Dispatch: if a closeout block for the same `dispatch_id` is already on the Issue, change nothing and only print `worker-release`.
+
+### Merged PR, Issue still open
+
+GitHub has not linked `Closes #123` on every PR (`closingIssuesReferences` stayed empty and the Issue stayed open after the merge). Check after merges:
+
+```sh
+scripts/issue-audit.sh            # preview
+scripts/issue-audit.sh --apply    # also comment the notice on the Issue
+```
+
+For every in-flight Issue (open, assigned to `@me`, with a Mapping block) it finds the PRs of the same repo whose body says `Closes` / `Fixes` / `Resolves #123`, and for each merged one prints:
+
+```
+<owner>/<repo>: PR #456 merged, Issue #123 still open: close it by hand
+```
+
+With `--apply` it posts that notice on the Issue, once per PR (marker `<!-- orca-issue-orchestrator-audit {"v":1,"pr":456} -->`). It never closes the Issue; a human does.
 
 ## Recovery after an Orca restart
 
-<!-- Filled by the issue-closeout and recovery ticket: list open Issues assigned to @me with the marker, read the latest block, run-use the Run, reconcile with worker-list --run and worktree list (linkedIssue). -->
+The Issues are the source of truth; Orca state is consulted afterwards.
 
-*To be written with the recovery procedure.*
+```sh
+scripts/issue-recover.sh            # preview
+scripts/issue-recover.sh --json     # the same as {issues, runs, bound_run, run_use}
+scripts/issue-recover.sh --apply    # also re-bind the Run
+```
+
+1. For every repo in `hub.json`: `gh issue list --assignee @me --state open --search "orca-issue-orchestrator in:comments"`, keeping Issues with a real Mapping block.
+2. Read the **latest** block on each Issue (after a retry there are several).
+3. Reconcile: `orca orchestration worker-list --run <run_id> --json` (all pages) for the row of the block's `dispatchId`, and `orca worktree list --json` for the row whose `identity.key` is the block's `worktree_id` and its `linkedIssue`.
+4. Print `orca orchestration run-use --id <run_id> --json`. `--apply` runs it, and nothing else; it skips it when the terminal is already bound to that Run and refuses when the Issues name more than one Run (bind the one you want by hand).
+
+Per Issue it reports the Issue, Run, Task, Dispatch, worktree (`linked`, `unlinked`, or `missing`), the worker row, and a state with its next step:
+
+| State | Meaning | Next |
+|-------|---------|------|
+| `succeeded` | `worker_done` succeeded | `issue-closeout.sh … succeeded` with the `worker_done` |
+| `failed` | `worker_done` failed | `issue-closeout.sh … failed … --needs` |
+| `working` | no outcome yet, agent `live` | `check --wait` |
+| `inspect` | no outcome, agent not proven live | `worker-show --dispatch`; never stop or retry from absence |
+| `unknown` | the Run has no worker row for the Dispatch | `worker-show --dispatch` |
+
+An `unlinked` worktree also gets `orca worktree set --worktree identity:<key> --issue 123 --json` to run yourself. A Task whose newest Dispatch has no Mapping comment is flagged.
 
 ## Reading Orca JSON
 
 - Every `--json` response is `{ok, result, ...}`; read `.result`.
-- `orca orchestration check --json` returns `result.messages[]` whose `.payload` is a JSON string; parse it with `fromjson` (`.result.messages[] | .payload | fromjson`).
+- `orca orchestration check --json` returns `result.messages[]` whose `.payload` is a JSON string; parse it with `fromjson` (`.result.messages[] | .payload | fromjson`). Heartbeats arrive in the same batch. A `worker_done` payload has `taskId`, `dispatchId`, `outcome` (`succeeded` / `failed`), `filesModified[]`, and an optional `reportPath`; the human summary is the message `.body`.
+- `orca orchestration worker-list --run <run_id> --json` is the fleet view: `result.workers[]` with `dispatchId`, `taskId`, `workerState`, `terminalState`, `resource.ownershipState`, `projection.outcome`, `projection.liveness.verdict`; `result.page.nextCursor` while `hasMore`.
+- `orca worktree list --json` rows carry `identity.key` and `linkedIssue` (an integer).
 - A `worker-start` receipt exits 1 unless the Worker is ready; it still carries `failedStage`, `effects[]`, and `residualResources[]`.
 
 ## Tests
 
 ```sh
 skills/orca-issue-orchestrator/tests/dispatch.test.sh
+skills/orca-issue-orchestrator/tests/closeout.test.sh
+skills/orca-issue-orchestrator/tests/recover.test.sh
 npx --yes shellcheck skills/orca-issue-orchestrator/scripts/*.sh skills/orca-issue-orchestrator/tests/*.sh \
   skills/orca-issue-orchestrator/tests/bin/gh skills/orca-issue-orchestrator/tests/bin/orca
 ```
 
-The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths).
+The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths; on closeout success one comment and no label or assignee change, on failure the label add, the unassign, and the comment in that order; `gh issue close` and `task-update` never invoked; recovery uses the latest of two Mapping blocks and runs only `run-use`). `tests/helpers.sh` holds the shared setup.

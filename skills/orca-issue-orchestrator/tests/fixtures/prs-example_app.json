@@ -1,0 +1,23 @@
+[
+  {
+    "number": 40,
+    "url": "https://github.com/example/app/pull/40",
+    "state": "OPEN",
+    "headRefName": "issue-12-add-password-reset",
+    "body": "Closes #12\n\nPassword reset."
+  },
+  {
+    "number": 41,
+    "url": "https://github.com/example/app/pull/41",
+    "state": "MERGED",
+    "headRefName": "issue-13-export-audit-log",
+    "body": "Closes #13\n\nAudit log export."
+  },
+  {
+    "number": 42,
+    "url": "https://github.com/example/app/pull/42",
+    "state": "MERGED",
+    "headRefName": "issue-130-other",
+    "body": "Closes #130"
+  }
+]
