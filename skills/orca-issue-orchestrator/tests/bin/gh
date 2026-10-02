@@ -75,7 +75,9 @@ pages() {
 
 case "${1:-} ${2:-}" in
   "issue view")
-    fixture "issue-$(repo_key "$(value_of -R "$@")")-$3.json"
+    # Like gh, only the first GraphQL page (100) of the comments.
+    data="$(fixture "issue-$(repo_key "$(value_of -R "$@")")-$3.json")" || exit 1
+    printf '%s' "$data" | jq 'if (.comments | type) == "array" then .comments |= .[:100] else . end'
     ;;
   "issue list")
     fixture "inflight-$(repo_key "$(value_of -R "$@")").json"
@@ -127,14 +129,21 @@ case "${1:-} ${2:-}" in
         pages search "$data" "$@"
         ;;
       repos/*/issues/*/comments*)
-        # Every comment of one Issue, from its entry in inflight-<owner>_<repo>.json.
+        # Every comment of one Issue: its entry in inflight-<owner>_<repo>.json,
+        # else issue-<owner>_<repo>-<n>.json.
         path="${target%%\?*}"
         path="${path#repos/}"
         n="${path%/comments}"
         n="${n##*/}"
-        data="$(fixture "inflight-$(repo_key "${path%/issues/*}").json")" || exit 1
-        data="$(printf '%s' "$data" | jq -c --argjson n "$n" \
-          '[first(.[] | select(.number == $n)) | .comments[]? | {user: {login: .author.login}, body}]')" || exit 1
+        key="$(repo_key "${path%/issues/*}")"
+        data="$(fixture "inflight-$key.json" 2> /dev/null || echo '[]')"
+        data="$(printf '%s' "$data" | jq -c --argjson n "$n" '[.[]? | select(.number == $n)]')" || exit 1
+        if [ "$data" = "[]" ]; then
+          data="$(fixture "issue-$key-$n.json")" || exit 1
+          data="[$data]"
+        fi
+        data="$(printf '%s' "$data" | jq -c \
+          '[first(.[]) | .comments[]? | {user: {login: .author.login}, body}]')" || exit 1
         pages rest "$data" "$@"
         ;;
       *)

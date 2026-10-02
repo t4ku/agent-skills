@@ -46,6 +46,13 @@ failed=0
 while IFS= read -r repo; do
   [ -n "$repo" ] || continue
   issues="$(gh_in_flight "$repo")" || die "cannot list the in-flight Issues of $repo"
+  # Closing keywords act only on a merge into the default branch; a PR merged
+  # elsewhere is expected to leave the Issue open.
+  default_branch=""
+  if [ "$(printf '%s' "$issues" | jq 'length')" -gt 0 ]; then
+    default_branch="$(gh_default_branch "$repo")"
+    [ -n "$default_branch" ] || die "cannot read the default branch of $repo"
+  fi
   while IFS= read -r issue; do
     [ -n "$issue" ] || continue
     number="$(json_get "$issue" '.number')"
@@ -76,6 +83,15 @@ while IFS= read -r repo; do
     fi
     merged="$(json_get "$merged" '.merged[]')"
     for pr in $merged; do
+      if ! base="$(gh pr view "$pr" -R "$repo" --json baseRefName | jq -er '.baseRefName')"; then
+        note "error: cannot read the base branch of PR #$pr of $repo; not reporting on #$number"
+        failed=1
+        continue
+      fi
+      if [ "$base" != "$default_branch" ]; then
+        note "note: PR #$pr of $repo merged into $base, not $default_branch; GitHub does not close #$number for it"
+        continue
+      fi
       found=1
       notice="PR #$pr merged, Issue #$number still open: close it by hand"
       printf '%s: %s\n' "$repo" "$notice"

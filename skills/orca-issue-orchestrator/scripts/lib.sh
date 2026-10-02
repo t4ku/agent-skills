@@ -215,6 +215,26 @@ EOF_LONG
   printf '%s' "$scan" | jq -c '.issues'
 }
 
+# gh_issue_comments <owner/repo> <n>: every comment of the Issue, as a JSON
+# array of {author: {login}, body}, from all REST pages. `gh issue view --json
+# comments` stops at the first GraphQL page, so a Mapping or closeout block
+# past comment 100 would go unseen. Returns 1 when gh fails.
+gh_issue_comments() {
+  local pages
+  pages="$(gh api --paginate "repos/$1/issues/$2/comments?per_page=100")" || return 1
+  printf '%s' "$pages" | jq -cs 'if length > 0 and all(.[]; type == "array") then add else error("not arrays") end
+    | map({author: {login: (.user.login? // "")}, body: (.body // "")})' 2> /dev/null
+}
+
+# gh_issue_view <owner/repo> <n> <fields>: gh issue view --json <fields>, with
+# .comments replaced by every comment (gh_issue_comments). Returns 1 when gh fails.
+gh_issue_view() {
+  local issue comments
+  issue="$(gh issue view "$2" -R "$1" --json "$3")" || return 1
+  comments="$(gh_issue_comments "$1" "$2")" || return 1
+  printf '%s' "$issue" | jq -c --argjson c "$comments" '.comments = $c'
+}
+
 # gh_in_flight_count: gh_in_flight summed over every repo in hub.json. Prints
 # nothing and returns 1 on failure; callers must treat that as a refusal (it
 # runs in a command substitution).
@@ -303,6 +323,15 @@ has_marker_comment() {
     any(.comments[]? | select(.author.login? == $login) | (.body // "")
       | scan("<!-- " + $m + " (\\{.*?\\}) -->") | .[0] | (try fromjson catch null);
       type == "object" and has($f) and (.[$f] | tostring) == $v)' > /dev/null 2>&1
+}
+
+# marker_fragment <text>: print the first orchestrator marker opening in the
+# text (`<!--` then any orca-issue-orchestrator marker, any spacing) and
+# return 0; return 1 when there is none. Worker-derived text (the worker_done
+# body, filesModified) must never carry one into a comment the orchestrator
+# posts: mapping_latest trusts every block in the orchestrator's comments.
+marker_fragment() {
+  printf '%s' "$1" | grep -Eo -m1 "<!--[[:space:]]*${MAPPING_MARKER}[A-Za-z0-9_-]*" | head -1 | grep .
 }
 
 # --- local paths ------------------------------------------------------------------

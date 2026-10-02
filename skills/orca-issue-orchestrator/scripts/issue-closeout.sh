@@ -87,8 +87,8 @@ if [ "$APPLY" -eq 1 ]; then mode="apply"; else mode="dry-run; add --apply to act
 
 # --- The Issue and its latest Mapping block ---------------------------------------
 
-issue="$(gh issue view "$number" -R "$repo" --json number,title,state,url,labels,comments)" ||
-  die "cannot read $repo#$number"
+issue="$(gh_issue_view "$repo" "$number" number,title,state,url,labels)" ||
+  die "cannot read $repo#$number and all its comments"
 block="$(mapping_latest "$issue" "$repo")" || die "cannot read the Mapping blocks on $repo#$number"
 [ -n "$block" ] || die "$repo#$number has no Mapping comment; nothing to close out"
 dispatch_id="$(json_get "$block" '.dispatch_id')"
@@ -145,6 +145,20 @@ summary="$(printf '%s' "$summary" | sed -e 's/[[:space:]]*$//')"
 if [ -n "$files_arg" ]; then
   files_json="$(printf '%s' "$files_arg" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')"
 fi
+
+# The Worker writes the summary and the files list; a marker block in them
+# would be posted under the orchestrator's login and then trusted.
+for field in summary files evidence needs; do
+  case "$field" in
+    summary) text="$summary" ;;
+    files) text="$files_json" ;;
+    evidence) text="$evidence" ;;
+    needs) text="$needs" ;;
+  esac
+  if frag="$(marker_fragment "$text")"; then
+    die "refusing to post: the $field holds an orchestrator marker ($frag); nothing was done"
+  fi
+done
 
 # --- The comment ---------------------------------------------------------------------
 

@@ -269,7 +269,15 @@ jq '.comments = [{"author": {"login": "orchestrator"}, "body": "> *Posted by an 
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: does not post a second Mapping comment for the same Dispatch" not_called "gh issue comment"
+
 check "receipt apply: says the comment exists" out_has "already"
+
+reset_fakes
+jq '.comments = [range(100) | {author: {login: "someone"}, body: "+1"}]
+    + [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a Mapping comment past the first page counts too" not_called "gh issue comment"
 
 reset_fakes
 jq '.comments = [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \

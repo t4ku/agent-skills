@@ -225,6 +225,8 @@ Both paths:
 
 - Print, never run, `orca orchestration worker-release --dispatch <dispatch_id> --json`. Run it after the comment is posted. It exits 0 even when the resource stays `external` / `retained` (a terminal created by an earlier failed attempt); read the state it reports, it is not a failure. The worktree is kept.
 - Never run `gh issue close` or `task-update`.
+- Read every comment of the Issue (`gh api --paginate repos/<owner>/<repo>/issues/123/comments`; `gh issue view` stops at the first 100), so the latest Mapping block and an earlier closeout are found on a long thread. `issue-dispatch.sh` step 2 reads the thread the same way before it decides a Mapping comment is already there.
+- Refuse, before any label or assignee change, when the summary, the files list, `--evidence`, or `--needs` holds an orchestrator marker (`<!--` followed by `orca-issue-orchestrator…`). The comment is posted under the orchestrator's login, so a marker the Worker wrote would otherwise be trusted by recovery and closeout.
 - Refuse to post a body holding a local path, before any label or assignee change: exit 1 with the offending path on stderr. `--redact` posts instead, with each local path replaced by `<local-path>`. See [Local paths](#local-paths).
 - Name the worktree from the Mapping block's `worktree` (else its `branch`), never from the current Issue title.
 - Post once per Dispatch: if a closeout block for the same `dispatch_id` is already on the Issue, change nothing and only print `worker-release` (also after the PR merged).
@@ -248,7 +250,7 @@ scripts/issue-audit.sh            # preview
 scripts/issue-audit.sh --apply    # also comment the notice on the Issue
 ```
 
-For every in-flight Issue (open, assigned to `@me`, with a Mapping block) it finds the PRs of the same repo whose body says `Closes` / `Fixes` / `Resolves #123`, and for each merged one prints:
+For every in-flight Issue (open, assigned to `@me`, with a Mapping block) it finds the PRs of the same repo whose body says `Closes` / `Fixes` / `Resolves #123`, and for each one merged into the repo's default branch (`gh pr view --json baseRefName`; closing keywords act only there, so a PR merged into another branch is only noted on stderr) prints:
 
 ```
 <owner>/<repo>: PR #456 merged, Issue #123 still open: close it by hand

@@ -62,8 +62,8 @@ repo_cfg="$(hub_repo "$repo")"
 
 if [ "$APPLY" -eq 1 ]; then mode="apply"; else mode="dry-run; add --apply to act"; fi
 
-issue="$(gh issue view "$number" -R "$repo" --json number,title,body,state,assignees,url,comments)" ||
-  die "cannot read $repo#$number"
+issue="$(gh_issue_view "$repo" "$number" number,title,body,state,assignees,url)" ||
+  die "cannot read $repo#$number and all its comments"
 title="$(json_get "$issue" '.title')"
 name="$(worktree_name "$number" "$title")"
 
