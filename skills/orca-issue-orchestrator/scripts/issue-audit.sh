@@ -21,8 +21,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
 
-AUDIT_MARKER="$MAPPING_MARKER-audit"
-
 hub_arg="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 while [ $# -gt 0 ]; do
@@ -53,7 +51,7 @@ while IFS= read -r repo; do
       found=1
       notice="PR #$pr merged, Issue #$number still open: close it by hand"
       printf '%s: %s\n' "$repo" "$notice"
-      if json_get "$issue" '.comments[]?.body' | grep -F "<!-- $AUDIT_MARKER " | grep -qF "\"pr\":$pr}"; then
+      if has_marker_comment "$issue" "$AUDIT_MARKER" "\"pr\":$pr}"; then
         printf '  (the notice is already on the Issue)\n'
         continue
       fi

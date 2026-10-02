@@ -14,7 +14,9 @@
 #   --json   Print {issues: [...], runs: [...], bound_run, run_use} instead of text
 #   --hub    Hub folder (default: $CLAUDE_PROJECT_DIR, else the current directory)
 #
-# State per Issue: succeeded / failed (worker_done arrived; close it out),
+# State per Issue: closed-out (a closeout comment for the Dispatch is posted;
+# wait for the merge, check with issue-audit.sh), succeeded / failed
+# (worker_done arrived; close it out),
 # working (live agent, no outcome yet), inspect (no outcome, agent not proven
 # live), unknown (the Run has no worker row for the Dispatch).
 # Exit codes: 0 done (or planned), 1 refused / error.
@@ -33,7 +35,7 @@ while [ $# -gt 0 ]; do
     --apply) APPLY=1; shift ;;
     --json) as_json=1; shift ;;
     --hub) [ $# -ge 2 ] || die "--hub needs a directory"; hub_arg="$2"; shift 2 ;;
-    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -50,8 +52,12 @@ while IFS= read -r repo; do
     [ -n "$issue" ] || continue
     block="$(mapping_latest "$issue")"
     [ -n "$block" ] || continue
-    rows="$(jq -cn --argjson rows "$rows" --arg repo "$repo" --argjson i "$issue" --argjson b "$block" '
-      $rows + [{repo: $repo, issue: $i.number, title: $i.title, url: $i.url,
+    closed_out=false
+    has_marker_comment "$issue" "$CLOSEOUT_MARKER" "\"dispatch_id\":\"$(json_get "$block" '.dispatch_id')\"" &&
+      closed_out=true
+    rows="$(jq -cn --argjson rows "$rows" --arg repo "$repo" --argjson i "$issue" --argjson b "$block" \
+      --argjson closed "$closed_out" '
+      $rows + [{repo: $repo, issue: $i.number, title: $i.title, url: $i.url, closed_out: $closed,
         run_id: $b.run_id, task_id: $b.task_id, dispatch_id: $b.dispatch_id,
         worktree_id: $b.worktree_id, branch: $b.branch}]')"
   done <<EOF_ISSUES
@@ -84,17 +90,21 @@ while IFS= read -r run; do
 done <<EOF_RUNS
 $(printf '%s' "$runs" | jq -r '.[]')
 EOF_RUNS
-worktrees="$(orca worktree list --json | jq -c '.result.worktrees // []')" ||
-  die "orca worktree list failed"
+wt_list="$(orca worktree list --json)" || die "orca worktree list failed; nothing was done"
+worktrees="$(printf '%s' "$wt_list" | jq -c '.result.worktrees // []')" && [ -n "$worktrees" ] ||
+  die "orca worktree list returned no JSON; nothing was done"
 
 closeout="$SCRIPT_DIR/issue-closeout.sh"
-rows="$(jq -cn --argjson rows "$rows" --argjson workers "$workers" --argjson wts "$worktrees" --arg closeout "$closeout" '
+audit="$SCRIPT_DIR/issue-audit.sh"
+rows="$(jq -cn --argjson rows "$rows" --argjson workers "$workers" --argjson wts "$worktrees" \
+  --arg closeout "$closeout" --arg audit "$audit" '
   $rows | map(
     . as $r
     | (first($workers[] | select(.dispatchId == $r.dispatch_id)) // null) as $w
     | (first($workers[] | select(.taskId == $r.task_id) | .dispatchId) // null) as $newest
     | (first($wts[] | select(.identity.key? == $r.worktree_id)) // null) as $wt
-    | (if $w == null then "unknown"
+    | (if $r.closed_out then "closed-out"
+       elif $w == null then "unknown"
        elif $w.projection.outcome == "succeeded" then "succeeded"
        elif $w.projection.outcome == "failed" then "failed"
        elif $w.projection.liveness.verdict == "live" then "working"
@@ -110,7 +120,8 @@ rows="$(jq -cn --argjson rows "$rows" --argjson workers "$workers" --argjson wts
           ["orca", "worktree", "set", "--worktree", "identity:" + $r.worktree_id, "--issue", ($r.issue | tostring), "--json"]
           else null end),
         state: $state,
-        next: (if $state == "succeeded" then [$closeout, $r.repo, ($r.issue | tostring), "succeeded", "<summary_file>"]
+        next: (if $state == "closed-out" then [$audit]
+          elif $state == "succeeded" then [$closeout, $r.repo, ($r.issue | tostring), "succeeded", "<summary_file>"]
           elif $state == "failed" then [$closeout, $r.repo, ($r.issue | tostring), "failed", "<summary_file>", "--needs", "<text>"]
           elif $state == "working" then ["orca", "orchestration", "check", "--wait", "--types", "worker_done,escalation,question", "--json"]
           else ["orca", "orchestration", "worker-show", "--dispatch", $r.dispatch_id, "--json"] end)
@@ -171,7 +182,8 @@ fi
 run="$(printf '%s' "$runs" | jq -r '.[0] // empty')"
 [ -n "$run" ] || die "the Mapping blocks carry no run_id"
 if [ "$run" = "$bound" ]; then
-  say "This terminal is already bound to $run."
+  say "$(print_cmd orca orchestration run-use --id "$run" --json)"
+  say "This terminal is already bound to $run; not running it."
   exit 0
 fi
 if [ "$as_json" -eq 1 ]; then

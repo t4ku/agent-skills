@@ -39,8 +39,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
 
-CLOSEOUT_MARKER="$MAPPING_MARKER-closeout"
-
 hub_arg="${CLAUDE_PROJECT_DIR:-$PWD}"
 pr_url=""
 files_arg=""
@@ -79,7 +77,7 @@ if [ "$APPLY" -eq 1 ]; then mode="apply"; else mode="dry-run; add --apply to act
 
 # --- The Issue and its latest Mapping block ---------------------------------------
 
-issue="$(gh issue view "$number" -R "$repo" --json number,title,state,url,comments)" ||
+issue="$(gh issue view "$number" -R "$repo" --json number,title,state,url,labels,comments)" ||
   die "cannot read $repo#$number"
 block="$(mapping_latest "$issue")"
 [ -n "$block" ] || die "$repo#$number has no Mapping comment; nothing to close out"
@@ -87,6 +85,23 @@ dispatch_id="$(json_get "$block" '.dispatch_id')"
 branch="$(json_get "$block" '.branch')"
 [ -n "$dispatch_id" ] || die "the latest Mapping block on $repo#$number has no dispatch_id"
 name="$(worktree_name "$number" "$(json_get "$issue" '.title')")"
+
+release_cmd() {
+  printf '\n# Release the Worker'"'"'s terminal (run it yourself; this script never does)\n'
+  print_cmd orca orchestration worker-release --dispatch "$dispatch_id" --json
+  printf 'It exits 0 even when the resource stays external / retained (a terminal from an\n'
+  printf 'earlier failed attempt): read the state it reports; that is not a failure.\n'
+  printf 'The worktree is kept. Never run task-update; the worker_done settled the Task.\n'
+}
+
+printf 'Closeout for %s#%s, Dispatch %s, %s (%s):\n\n' "$repo" "$number" "$dispatch_id" "$outcome" "$mode"
+
+# Post once per Dispatch: a rerun (even after the PR merged) changes nothing.
+if has_marker_comment "$issue" "$CLOSEOUT_MARKER" "\"dispatch_id\":\"$dispatch_id\""; then
+  printf 'A closeout comment for Dispatch %s is already on the Issue; changing nothing.\n' "$dispatch_id"
+  release_cmd
+  exit 0
+fi
 
 # --- The summary: a check --json batch, or plain text -------------------------------
 
@@ -123,7 +138,8 @@ closeout_block="$(jq -cn --arg d "$dispatch_id" --arg o "$outcome" '{v: 1, dispa
 
 if [ "$outcome" = "succeeded" ]; then
   if [ -z "$pr_url" ]; then
-    pr_url="$(printf '%s\n' "$summary" | grep -Eo "https://github\.com/$repo/pull/[0-9]+" | head -1)"
+    repo_re="$(printf '%s' "$repo" | sed 's/[.]/\\./g')"
+    pr_url="$(printf '%s\n' "$summary" | grep -Eo "https://github\.com/$repo_re/pull/[0-9]+" | head -1)"
   fi
   if [ -z "$pr_url" ] && [ -n "$branch" ]; then
     prs="$(gh pr list -R "$repo" --head "$branch" --state open --json number,url,state,headRefName)" ||
@@ -167,26 +183,16 @@ fi
 
 has_local_path "$body" && die "refusing to post: the comment would contain a local path; rewrite the summary or pass --evidence"
 
-release_cmd() {
-  printf '\n# Release the Worker'"'"'s terminal (run it yourself; this script never does)\n'
-  print_cmd orca orchestration worker-release --dispatch "$dispatch_id" --json
-  printf 'It exits 0 even when the resource stays external / retained (a terminal from an\n'
-  printf 'earlier failed attempt): read the state it reports; that is not a failure.\n'
-  printf 'The worktree is kept. Never run task-update; the worker_done settled the Task.\n'
-}
 
-printf 'Closeout for %s#%s, Dispatch %s, %s (%s):\n\n' "$repo" "$number" "$dispatch_id" "$outcome" "$mode"
 
-if json_get "$issue" '.comments[]?.body' | grep -F "<!-- $CLOSEOUT_MARKER " | grep -qF "\"dispatch_id\":\"$dispatch_id\""; then
-  printf 'A closeout comment for Dispatch %s is already on the Issue; changing nothing.\n' "$dispatch_id"
-  release_cmd
-  exit 0
-fi
 
 if [ "$outcome" = "failed" ]; then
   # Label first: if the unassign then fails, the Issue is still out of the Frontier.
   printf '# 1. Mark the Issue needs-info\n'
-  mutate gh issue edit "$number" -R "$repo" --add-label needs-info --remove-label ready-for-agent ||
+  # Take ready-for-agent off only when it is there (removing an absent label can fail).
+  label_args=(--add-label needs-info)
+  json_get "$issue" '.labels[]?.name' | grep -qxF ready-for-agent && label_args+=(--remove-label ready-for-agent)
+  mutate gh issue edit "$number" -R "$repo" "${label_args[@]}" ||
     die "the label change failed; nothing else was done"
   printf '\n# 2. Release the claim\n'
   mutate gh issue edit "$number" -R "$repo" --remove-assignee @me ||

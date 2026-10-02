@@ -178,7 +178,7 @@ The PR is `--pr <url>`, else the first `https://github.com/<owner>/<repo>/pull/<
 
 **Failure** (`failed`, or Orca reports a failed attempt): with `--apply`, in this order:
 
-1. `gh issue edit 123 -R <owner>/<repo> --add-label needs-info --remove-label ready-for-agent` (label first, so a failed unassign cannot put the Issue back in the Frontier)
+1. `gh issue edit 123 -R <owner>/<repo> --add-label needs-info --remove-label ready-for-agent` (`--remove-label` only when the Issue has it; label first, so a failed unassign cannot put the Issue back in the Frontier)
 2. `gh issue edit 123 -R <owner>/<repo> --remove-assignee @me`
 3. `gh issue comment 123 -R <owner>/<repo> --body-file -` with the failed report:
 
@@ -198,14 +198,14 @@ Worktree `issue-123-<slug>` (branch `<branch>`) is kept for inspection.
 <!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"failed"} -->
 ```
 
-Write `--needs` yourself from the report: the information missing from the Issue, or the decision a human must take. `reportPath` is a local path and is never posted. There is no automatic retry; the Issue returns to the Frontier when a human answers and restores `ready-for-agent`.
+Pass `--evidence` with the gist of the report file, or the tail of `orca orchestration worker-read --dispatch <dispatch_id> --limit 50 --json`, rewritten without local paths; the default only points at `worker-read`. Write `--needs` yourself from the report: the information missing from the Issue, or the decision a human must take. `reportPath` is a local path and is never posted. There is no automatic retry; the Issue returns to the Frontier when a human answers and restores `ready-for-agent`.
 
 Both paths:
 
 - Print, never run, `orca orchestration worker-release --dispatch <dispatch_id> --json`. Run it after the comment is posted. It exits 0 even when the resource stays `external` / `retained` (a terminal created by an earlier failed attempt); read the state it reports, it is not a failure. The worktree is kept.
 - Never run `gh issue close` or `task-update`.
 - Refuse to post a body holding the Hub folder path, your home directory, or a `::/` worktree path.
-- Post once per Dispatch: if a closeout block for the same `dispatch_id` is already on the Issue, change nothing and only print `worker-release`.
+- Post once per Dispatch: if a closeout block for the same `dispatch_id` is already on the Issue, change nothing and only print `worker-release` (also after the PR merged).
 
 ### Merged PR, Issue still open
 
@@ -237,12 +237,13 @@ scripts/issue-recover.sh --apply    # also re-bind the Run
 1. For every repo in `hub.json`: `gh issue list --assignee @me --state open --search "orca-issue-orchestrator in:comments"`, keeping Issues with a real Mapping block.
 2. Read the **latest** block on each Issue (after a retry there are several).
 3. Reconcile: `orca orchestration worker-list --run <run_id> --json` (all pages) for the row of the block's `dispatchId`, and `orca worktree list --json` for the row whose `identity.key` is the block's `worktree_id` and its `linkedIssue`.
-4. Print `orca orchestration run-use --id <run_id> --json`. `--apply` runs it, and nothing else; it skips it when the terminal is already bound to that Run and refuses when the Issues name more than one Run (bind the one you want by hand).
+4. Print `orca orchestration run-use --id <run_id> --json`. `--apply` runs it, and nothing else; it prints but skips it when the terminal is already bound to that Run and refuses when the Issues name more than one Run (bind the one you want by hand).
 
 Per Issue it reports the Issue, Run, Task, Dispatch, worktree (`linked`, `unlinked`, or `missing`), the worker row, and a state with its next step:
 
 | State | Meaning | Next |
 |-------|---------|------|
+| `closed-out` | a closeout comment for the Dispatch is on the Issue | wait for the merge; `issue-audit.sh` |
 | `succeeded` | `worker_done` succeeded | `issue-closeout.sh … succeeded` with the `worker_done` |
 | `failed` | `worker_done` failed | `issue-closeout.sh … failed … --needs` |
 | `working` | no outcome yet, agent `live` | `check --wait` |

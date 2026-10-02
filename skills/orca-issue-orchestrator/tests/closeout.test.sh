@@ -143,6 +143,20 @@ check "already closed out: changes nothing" no_mutation
 check "already closed out: still prints worker-release" out_has_line "$RELEASE"
 
 reset_fakes
+jq '.labels = []' "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
+run "$CLOSEOUT" example/app 12 failed "$FIXTURES/check-worker-failed.json" --hub "$HUB" --needs "$NEEDS" --apply
+check "no ready-for-agent label: only adds needs-info" \
+  bash -c '[ "$(mutations_of | head -1)" = "gh issue edit 12 -R example/app --add-label needs-info" ]'
+
+reset_fakes
+jq '.comments += [{"body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
+  "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
+echo '[]' > "$OVR/prs-example_app.json"
+run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary.txt" --hub "$HUB" --apply
+check "rerun after the merge: exits 0" code_is 0
+check "rerun after the merge: changes nothing" no_mutation
+
+reset_fakes
 run "$CLOSEOUT" example/app 12 finished "$WORK/summary.txt" --hub "$HUB"
 check "bad outcome: refuses" code_is 1
 

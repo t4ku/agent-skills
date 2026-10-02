@@ -99,6 +99,20 @@ run "$RECOVER" --hub "$HUB" --apply
 check "already bound: exits 0" code_is 0
 check "already bound: no run-use" no_mutation
 check "already bound: says so" out_has "already bound"
+check "already bound: still prints run-use" out_has_line "$RUN_USE"
+
+reset_fakes
+in_flight_two
+touch "$OVR/orca-worktree-list.json.fail"
+run "$RECOVER" --hub "$HUB" --apply
+check "worktree list fails: refuses" code_is 1
+check "worktree list fails: binds nothing" no_mutation
+
+reset_fakes
+jq '(.[] | select(.number == 12) | .comments) += [{"body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
+  "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+run "$RECOVER" --hub "$HUB" --json
+check "closed out: state closed-out, next is the audit" row 12 '.state == "closed-out" and (.next[0] | endswith("issue-audit.sh"))'
 
 reset_fakes
 jq '(.[] | select(.number == 13) | .comments[0].body) |= sub("run_test12"; "run_other")' \

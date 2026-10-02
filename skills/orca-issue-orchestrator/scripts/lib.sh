@@ -14,6 +14,10 @@ DISCLAIMER='> *Posted by an AI orchestrator.*'
 # Marker of the Mapping comment's machine-readable block; also the search term
 # that finds in-flight Issues.
 MAPPING_MARKER='orca-issue-orchestrator'
+# Markers of the closeout and merged-PR notice comments; each makes its
+# comment post once.
+CLOSEOUT_MARKER="$MAPPING_MARKER-closeout"
+AUDIT_MARKER="$MAPPING_MARKER-audit"
 
 # Set to 1 by a script's --apply flag.
 APPLY=0
@@ -154,6 +158,12 @@ mapping_latest() {
       | scan("<!-- " + $m + " (\\{.*?\\}) -->") | .[0]
       | (try fromjson catch empty) | select(type == "object")]
     | last // empty'
+}
+
+# has_marker_comment <json with .comments[]> <marker> <fragment>: true when a
+# comment holds a `<!-- <marker> {...} -->` block containing <fragment>.
+has_marker_comment() {
+  json_get "$1" '.comments[]?.body' | grep -F "<!-- $2 " | grep -qF -- "$3"
 }
 
 # has_local_path <text>: true when the text holds the Hub folder path, its

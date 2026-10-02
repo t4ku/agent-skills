@@ -8,6 +8,11 @@
       "login": "orchestrator"
     }
   ],
+  "labels": [
+    {
+      "name": "ready-for-agent"
+    }
+  ],
   "body": "## What to build\n\nA password reset flow.",
   "comments": [
     {

@@ -40,7 +40,8 @@ export PATH="$HELPERS_DIR/bin:$PATH"
 export FAKE_FIXTURES="$FIXTURES"
 export FAKE_LOG="$WORK/calls.log"
 
-# Per-test overrides of single fixtures.
+# Per-test overrides of single fixtures; an empty <fixture>.fail makes the
+# fake exit 1 for that fixture.
 OVR="$WORK/overrides"
 
 # --- helpers ----------------------------------------------------------------
