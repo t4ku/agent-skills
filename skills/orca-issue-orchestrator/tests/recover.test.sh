@@ -21,9 +21,14 @@ RECOVER="$SCRIPTS/issue-recover.sh"
 
 RUN_USE='orca orchestration run-use --id run_test12 --json'
 
+# run_json <args...>: like run, but OUT is stdout only (--json writes commands to stderr).
+run_json() {
+  OUT="$(cd "$HUB" && bash "$RECOVER" "$@" 2> /dev/null)"
+}
+
 in_flight_two() { cp "$FIXTURES/inflight-two-example_app.json" "$OVR/inflight-example_app.json"; }
 # row <n> <jq test>: the --json row of Issue <n> satisfies the test.
-row() { printf '%s' "$OUT" | jq -e --argjson n "$1" "first(.issues[] | select(.issue == \$n)) | $2" > /dev/null 2>&1; }
+row() { printf '%s' "$OUT" | jq -e --argjson n "$1" "first(.issues[] | select(.issue == \$n)) | $2" > /dev/null; }
 
 # --- dry-run --------------------------------------------------------------------
 
@@ -51,7 +56,7 @@ check "dry-run: points a settled Issue at closeout" out_has "issue-closeout.sh e
 
 reset_fakes
 in_flight_two
-run "$RECOVER" --hub "$HUB" --json
+run_json --hub "$HUB" --json
 check "json: valid, two Issues" bash -c 'printf "%s" "$1" | jq -e ".issues | length == 2" >/dev/null' _ "$OUT"
 check "json: #12 latest block" row 12 '.run_id == "run_test12" and .task_id == "task_test12" and .dispatch_id == "ctx_test12"'
 check "json: #12 worktree and branch" row 12 '.worktree_id == "wt2:local:inst-12" and .branch == "issue-12-add-password-reset"'
@@ -66,14 +71,14 @@ reset_fakes
 in_flight_two
 jq '.result.workers[0].workerState = "ready" | .result.workers[0].projection.outcome = "in_progress" | .result.workers[0].projection.liveness.verdict = "live"' \
   "$FIXTURES/orca-worker-list-run_test12.json" > "$OVR/orca-worker-list-run_test12.json"
-run "$RECOVER" --hub "$HUB" --json
+run_json --hub "$HUB" --json
 check "json: a live in-progress worker is working" row 12 '.state == "working"'
 
 reset_fakes
 in_flight_two
 jq '.result.workers[0].projection.outcome = "failed"' \
   "$FIXTURES/orca-worker-list-run_test12.json" > "$OVR/orca-worker-list-run_test12.json"
-run "$RECOVER" --hub "$HUB" --json
+run_json --hub "$HUB" --json
 check "json: a failed worker is failed" row 12 '.state == "failed"'
 
 reset_fakes
@@ -111,7 +116,7 @@ check "worktree list fails: binds nothing" no_mutation
 reset_fakes
 jq '(.[] | select(.number == 12) | .comments) += [{"body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
-run "$RECOVER" --hub "$HUB" --json
+run_json --hub "$HUB" --json
 check "closed out: state closed-out, next is the audit" row 12 '.state == "closed-out" and (.next[0] | endswith("issue-audit.sh"))'
 
 reset_fakes
