@@ -23,7 +23,8 @@
 #   --pr        The PR URL or number (default: the first PR URL of this repo
 #               in the summary, else the open PR whose head is the Mapping
 #               branch). Whatever its source, the PR must be OPEN, in this
-#               repo, and have the Mapping branch as its head.
+#               repo, have the Mapping branch as its head, and start its body
+#               with `Closes #<n>` for this Issue.
 #   --files     Files modified, comma-separated (default: the worker_done
 #               payload's filesModified). succeeded needs at least one.
 #   --needs     failed only, required with --apply: what a human must supply
@@ -62,7 +63,7 @@ while [ $# -gt 0 ]; do
     --files) [ $# -ge 2 ] || die "--files needs a list"; files_arg="$2"; shift 2 ;;
     --needs) [ $# -ge 2 ] || die "--needs needs a text"; needs="$2"; shift 2 ;;
     --evidence) [ $# -ge 2 ] || die "--evidence needs a text"; evidence="$2"; shift 2 ;;
-    -h | --help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -?*) die "unknown option: $1" ;;
     *) positional+=("$1"); shift ;;
   esac
@@ -162,14 +163,16 @@ done
 
 # --- The comment ---------------------------------------------------------------------
 
-closeout_block="$(jq -cn --arg d "$dispatch_id" --arg o "$outcome" '{v: 1, dispatch_id: $d, outcome: $o}')"
+closeout_block="$(jq -cn --arg d "$dispatch_id" --arg o "$outcome" --arg hub "$(hub_id)" \
+  '{v: 1, dispatch_id: $d, outcome: $o, hub: $hub}')"
 
 # validate_pr <url|number> <source>: resolve the PR with gh pr view and refuse
-# unless it is OPEN, in $repo, and its head is the Mapping $branch of $repo
-# itself (not a fork). Reads $repo and $branch; sets pr_url to the PR's
-# canonical URL.
+# unless it is OPEN, in $repo, its head is the Mapping $branch of $repo
+# itself (not a fork), and the first non-empty line of its body closes this
+# Issue (`Closes #<n>`; any GitHub closing keyword, any case). Reads $repo,
+# $number, and $branch; sets pr_url to the PR's canonical URL.
 validate_pr() {
-  local ref="$1" src="$2" n pr_repo view state head head_repo cross
+  local ref="$1" src="$2" n pr_repo view state head head_repo cross first_line
   case "$ref" in
     https://github.com/*/*/pull/*)
       pr_repo="$(printf '%s' "$ref" | sed -E 's#^https://github\.com/([^/]+/[^/]+)/pull/.*#\1#')"
@@ -180,7 +183,7 @@ validate_pr() {
   printf '%s' "$n" | grep -Eq '^[1-9][0-9]*$' || die "the PR ($src) is not a PR URL or number: $ref"
   [ "$(lower "$pr_repo")" = "$(lower "$repo")" ] ||
     die "the PR ($src) $ref is in $pr_repo, not $repo; refusing a succeeded closeout"
-  view="$(gh pr view "$n" -R "$repo" --json number,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository,url)" ||
+  view="$(gh pr view "$n" -R "$repo" --json number,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository,url,body)" ||
     die "cannot read PR #$n of $repo ($src); refusing a succeeded closeout"
   state="$(json_get "$view" '.state')"
   head="$(json_get "$view" '.headRefName')"
@@ -195,6 +198,11 @@ validate_pr() {
     die "PR #$n of $repo ($src) comes from $head_repo, not $repo; refusing a succeeded closeout"
   [ -n "$branch" ] && [ "$head" = "$branch" ] ||
     die "PR #$n of $repo ($src) has head branch '${head:-?}', not the Mapping branch '${branch:-?}'; refusing a succeeded closeout"
+  # The same keywords issue-audit.sh looks for, but only on the first line.
+  first_line="$(json_get "$view" '.body // "" | split("\n") | map(select(test("\\S"))) | first // ""')"
+  printf '%s' "$first_line" | jq -Rse --arg n "$number" \
+    'test("^\\s*(close[sd]?|fix(e[sd])?|resolve[sd]?):?\\s+#" + $n + "\\b"; "i")' > /dev/null ||
+    die "PR #$n of $repo ($src) does not start its body with \`Closes #$number\` (first line: '${first_line:-empty}'); GitHub would not close the Issue on merge and issue-audit.sh would not find the PR; refusing a succeeded closeout"
 }
 
 if [ "$outcome" = "succeeded" ]; then

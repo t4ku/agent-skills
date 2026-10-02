@@ -10,5 +10,6 @@
     "login": "example"
   },
   "isCrossRepository": false,
-  "baseRefName": "main"
+  "baseRefName": "main",
+  "body": "Closes #13\n\nAudit log export."
 }

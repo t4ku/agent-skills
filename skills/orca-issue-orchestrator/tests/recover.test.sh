@@ -114,10 +114,32 @@ check "worktree list fails: refuses" code_is 1
 check "worktree list fails: binds nothing" no_mutation
 
 reset_fakes
-jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
+in_flight_two
+touch "$OVR/orca-worker-list-run_test12.json.fail"
+run "$RECOVER" --hub "$HUB" --apply
+check "worker-list fails: refuses" code_is 1
+check "worker-list fails: binds nothing" no_mutation
+check "worker-list fails: names worker-list" out_has "worker-list --run run_test12"
+check "worker-list fails: never reports the Issues as unknown" out_lacks "unknown"
+
+reset_fakes
+in_flight_two
+touch "$OVR/orca-worker-list-run_test12.json.fail"
+run "$RECOVER" --hub "$HUB" --json
+check "worker-list fails, --json: refuses" code_is 1
+check "worker-list fails, --json: prints no report" out_lacks '"issues"'
+
+reset_fakes
+jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run_json --hub "$HUB" --json
 check "closed out: state closed-out, next is the audit" row 12 '.state == "closed-out" and (.next[0] | endswith("issue-audit.sh"))'
+
+reset_fakes
+jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\",\"hub\":\"other-hub\"} -->"}]' \
+  "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+run_json --hub "$HUB" --json
+check "closeout marker of another Hub: not closed out" row 12 '.state == "succeeded"'
 
 reset_fakes
 jq '(.[] | select(.number == 13) | .comments[0].body) |= sub("run_test12"; "run_other")' \
@@ -130,7 +152,7 @@ check "two Runs: prints both run-use commands" \
   bash -c 'printf "%s\n" "$1" | grep -qxF "$2" && printf "%s\n" "$1" | grep -qxF "orca orchestration run-use --id run_other --json"' _ "$OUT" "$RUN_USE"
 
 reset_fakes
-jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "Supersedes \"dispatch_id\":\"ctx_test12\" <!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_old12\",\"outcome\":\"failed\"} -->"}]' \
+jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "Supersedes \"dispatch_id\":\"ctx_test12\" <!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_old12\",\"outcome\":\"failed\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run_json --hub "$HUB" --json
 check "closeout marker of another Dispatch, prose naming ours: not closed out" row 12 '.state == "succeeded"'

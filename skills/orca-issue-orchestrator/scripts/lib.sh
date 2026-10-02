@@ -312,17 +312,20 @@ mapping_latest() {
 
 # has_marker_comment <json with .comments[]> <marker> <field> <value>: true
 # when a comment by the authenticated orchestrator holds a
-# `<!-- <marker> {...} -->` block whose <field> is <value> (compared as text).
-# Only the parsed block counts: prose around it that names another id does
-# not. Other authors' markers are ignored.
+# `<!-- <marker> {...} -->` block whose <field> is <value> (compared as text)
+# and whose hub is this Hub's hub_id (any non-empty hub when no hub.json is
+# loaded, as for Mapping blocks). Only the parsed block counts: prose around
+# it that names another id does not. Other authors' markers, and markers of
+# another Hub or with no hub, are ignored.
 has_marker_comment() {
   local login
   login="$(gh_login)" || return 1
   # shellcheck disable=SC2016  # jq variables
-  printf '%s' "$1" | jq -e --arg login "$login" --arg m "$2" --arg f "$3" --arg v "$4" '
+  printf '%s' "$1" | jq -e --arg login "$login" --arg m "$2" --arg f "$3" --arg v "$4" --arg hub "$(mapping_hub)" '
     any(.comments[]? | select(.author.login? == $login) | (.body // "")
       | scan("<!-- " + $m + " (\\{.*?\\}) -->") | .[0] | (try fromjson catch null);
-      type == "object" and has($f) and (.[$f] | tostring) == $v)' > /dev/null 2>&1
+      type == "object" and has($f) and (.[$f] | tostring) == $v
+      and (.hub | type) == "string" and (.hub | length) > 0 and ($hub == "" or .hub == $hub))' > /dev/null 2>&1
 }
 
 # marker_fragment <text>: print the first orchestrator marker opening in the

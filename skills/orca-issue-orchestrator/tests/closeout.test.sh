@@ -55,6 +55,8 @@ check "success apply: the comment has the summary" comment_has "Added the passwo
 check "success apply: the comment lists the files modified" comment_has '- `src/reset.test.ts`'
 check "success apply: heartbeats and other Dispatches are ignored" comment_lacks "other.txt"
 check "success apply: the comment has no local path" no_abs_path "$FAKE_LOG.comment"
+check "success apply: the closeout marker names the Hub" \
+  comment_has '<!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"ctx_test12","outcome":"succeeded","hub":"example-hub"} -->'
 
 reset_fakes
 printf 'Added the reset flow. Tests pass. Nothing left.\n' > "$WORK/summary.txt"
@@ -118,6 +120,43 @@ run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary-merged.txt" --hub "$HUB"
 check "summary names a merged PR: refuses" code_is 1
 check "summary names a merged PR: posts nothing" no_mutation
 
+# --- PR body: its first line must close this Issue ---------------------------------
+
+# pr_body <body>: PR #40 answers gh pr view with that body.
+pr_body() { jq --arg b "$1" '.body = $b' "$FIXTURES/pr-example_app-40.json" > "$OVR/pr-example_app-40.json"; }
+
+reset_fakes
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "PR body: gh pr view reads the body" bash -c 'calls | grep -q "^gh pr view 40 -R example/app --json .*body"'
+
+reset_fakes
+pr_body $'Password reset.\n\nCloses #12'
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "PR body without a closing first line: refuses" code_is 1
+check "PR body without a closing first line: names the missing line" out_has "Closes #12"
+check "PR body without a closing first line: posts nothing" no_mutation
+
+reset_fakes
+pr_body $'Closes #13\n\nPassword reset.'
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "PR body closing another Issue: refuses" code_is 1
+check "PR body closing another Issue: posts nothing" no_mutation
+
+reset_fakes
+pr_body 'Closes #123'
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "PR body closing #123, not #12: refuses" code_is 1
+
+reset_fakes
+pr_body ''
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "PR with an empty body: refuses" code_is 1
+
+reset_fakes
+pr_body $'\n  fixes #12: password reset\n'
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "PR body 'fixes #12:' after a blank line: accepted" bash -c '[ "$(mutations_of)" = "$1" ]' _ "$COMMENT"
+
 reset_fakes
 touch "$OVR/pr-example_app-40.json.fail"
 run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
@@ -179,7 +218,7 @@ check "only forged markers: refuses" code_is 1
 check "only forged markers: posts nothing" no_mutation
 
 reset_fakes
-jq '.comments += [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"failed\"} -->"}]' \
+jq '.comments += [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"failed\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
 run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
 check "forged closeout marker: does not suppress the closeout" bash -c '[ "$(mutations_of)" = "$1" ]' _ "$COMMENT"
@@ -316,19 +355,31 @@ check "block with a worktree field: names it" comment_has 'Worktree `issue-12-pw
 # --- markers: only the field inside the block counts -----------------------------------
 
 reset_fakes
-jq '.comments += [{"author": {"login": "orchestrator"}, "body": "Retry of \"dispatch_id\":\"ctx_test12\" <!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_old12\",\"outcome\":\"failed\"} -->"}]' \
+jq '.comments += [{"author": {"login": "orchestrator"}, "body": "Retry of \"dispatch_id\":\"ctx_test12\" <!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_old12\",\"outcome\":\"failed\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
 run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
 check "closeout marker of another Dispatch, prose naming ours: still posts" \
   bash -c '[ "$(mutations_of)" = "$1" ]' _ "$COMMENT"
 
 reset_fakes
-jq '.comments += [{"author": {"login": "orchestrator"}, "body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"failed\"} -->"}]' \
+jq '.comments += [{"author": {"login": "orchestrator"}, "body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"failed\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
 run "$CLOSEOUT" example/app 12 failed "$FIXTURES/check-worker-failed.json" --hub "$HUB" --needs "$NEEDS" --apply
 check "already closed out: exits 0" code_is 0
 check "already closed out: changes nothing" no_mutation
 check "already closed out: still prints worker-release" out_has_line "$RELEASE"
+
+reset_fakes
+jq '.comments += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"failed\",\"hub\":\"other-hub\"} -->"}]' \
+  "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "closeout marker of another Hub: does not suppress the closeout" bash -c '[ "$(mutations_of)" = "$1" ]' _ "$COMMENT"
+
+reset_fakes
+jq '.comments += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"failed\"} -->"}]' \
+  "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "closeout marker without a Hub: does not suppress the closeout" bash -c '[ "$(mutations_of)" = "$1" ]' _ "$COMMENT"
 
 reset_fakes
 jq '.labels = []' "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
@@ -337,7 +388,7 @@ check "no ready-for-agent label: only adds needs-info" \
   bash -c '[ "$(mutations_of | head -1)" = "gh issue edit 12 -R example/app --add-label needs-info" ]'
 
 reset_fakes
-jq '.comments += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
+jq '.comments += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
 echo '[]' > "$OVR/prs-example_app.json"
 run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary.txt" --hub "$HUB" --apply
@@ -362,7 +413,7 @@ check "long thread: reads every comment page" called "gh api --paginate repos/ex
 
 reset_fakes
 jq '.comments += [range(100) | {author: {login: "someone"}, body: "+1"}]
-    + [{author: {login: "orchestrator"}, body: "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\"} -->"}]' \
+    + [{author: {login: "orchestrator"}, body: "<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"succeeded\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
 run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
 check "long thread: a closeout past the first page still counts" no_mutation
@@ -415,16 +466,26 @@ check "audit apply: never closes the Issue" never_closes
 check "audit apply: the comment starts with the AI disclaimer" \
   bash -c '[ "$(head -1 "$FAKE_LOG.comment")" = "> *Posted by an AI orchestrator.*" ]'
 check "audit apply: the comment carries the notice" comment_has "PR #41 merged, Issue #13 still open: close it by hand"
+check "audit apply: the audit marker names the Hub" \
+  comment_has '<!-- orca-issue-orchestrator-audit {"v":1,"pr":41,"hub":"example-hub"} -->'
+check "audit apply: the comment has no local path" no_abs_path "$FAKE_LOG.comment"
 
 reset_fakes
-jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":41} -->"}]' \
+jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":41,\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run "$AUDIT" --hub "$HUB" --apply
 check "audit apply: does not post the same notice twice" no_mutation
 check "audit apply: still prints the notice" out_has_line "$NOTICE"
 
 reset_fakes
-jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":41} -->"}]' \
+jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":41,\"hub\":\"other-hub\"} -->"}]' \
+  "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+run "$AUDIT" --hub "$HUB" --apply
+check "audit apply: a notice marker of another Hub does not suppress the notice" \
+  bash -c '[ "$(mutations_of)" = "gh issue comment 13 -R example/app --body-file -" ]'
+
+reset_fakes
+jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":41,\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run "$AUDIT" --hub "$HUB" --apply
 check "audit apply: a forged notice marker does not suppress the notice" \
@@ -445,7 +506,7 @@ run "$AUDIT" --hub "$HUB"
 check "audit: an Issue of another hub is not in flight" out_lacks "Issue #13"
 
 reset_fakes
-jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":7} --> superseded \"pr\":41}"}]' \
+jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":7,\"hub\":\"example-hub\"} --> superseded \"pr\":41}"}]' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run "$AUDIT" --hub "$HUB" --apply
 check "audit: a notice for another PR, prose naming ours, does not suppress it" \

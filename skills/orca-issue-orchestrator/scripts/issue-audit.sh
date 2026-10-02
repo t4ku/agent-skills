@@ -100,7 +100,7 @@ while IFS= read -r repo; do
         continue
       fi
       body="$(printf '%s\n\n%s.\n\n<!-- %s %s -->\n' "$DISCLAIMER" "$notice" "$AUDIT_MARKER" \
-        "$(jq -cn --argjson pr "$pr" '{v: 1, pr: $pr}')")"
+        "$(jq -cn --argjson pr "$pr" --arg hub "$(hub_id)" '{v: 1, pr: $pr, hub: $hub}')")"
       mutate gh issue comment "$number" -R "$repo" --body-file - <<< "$body" || die "gh issue comment failed"
     done
   done <<EOF_ISSUES

@@ -255,7 +255,7 @@ check "receipt apply, no name in the receipt: the worktree name is the branch" \
   bash -c 'sed -n "s/^<!-- orca-issue-orchestrator \(.*\) -->\$/\1/p" "$FAKE_LOG.comment" | jq -e ".worktree == \"issue-7-add-login-page\"" >/dev/null'
 
 reset_fakes
-jq '.comments = [{"author": {"login": "orchestrator"}, "body": "Replaces \"dispatch_id\":\"ctx_test1\" <!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_other\"} -->"}]' \
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "Replaces \"dispatch_id\":\"ctx_test1\" <!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_other\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: a Mapping block of another Dispatch with prose naming ours does not stop it" called "gh issue comment 7"
@@ -265,7 +265,7 @@ run "$DISPATCH" example/app 7 --hub . --receipt "$FIXTURES/receipt-ready.json" -
 check "receipt apply: a relative --hub still posts the comment" called "gh issue comment 7"
 
 reset_fakes
-jq '.comments = [{"author": {"login": "orchestrator"}, "body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: does not post a second Mapping comment for the same Dispatch" not_called "gh issue comment"
@@ -274,13 +274,13 @@ check "receipt apply: says the comment exists" out_has "already"
 
 reset_fakes
 jq '.comments = [range(100) | {author: {login: "someone"}, body: "+1"}]
-    + [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
+    + [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: a Mapping comment past the first page counts too" not_called "gh issue comment"
 
 reset_fakes
-jq '.comments = [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
+jq '.comments = [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: a forged Mapping comment does not stop the real one" called "gh issue comment 7"

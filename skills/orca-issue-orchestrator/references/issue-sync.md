@@ -150,7 +150,7 @@ Anyone can comment on a public Issue, so a copied or forged block must not make 
 - `repo` is the Issue's `<owner>/<repo>` (case-insensitive, as on GitHub) and `issue` is its number.
 - `hub` is the `hub_id` in `hub.json`. (Every script loads a `hub.json`; the shared check, run without one, would accept any non-empty `hub` and log it.)
 
-Every other block is skipped, in closeout, audit, recovery, and the dispatch count alike, with a `warning: <owner>/<repo>#123: ignoring a Mapping block: <reason>` line on stderr. An Issue with no trusted block is not in flight. The closeout and audit markers (and the Mapping-comment dedupe in step 2 of dispatch) likewise count only when the authenticated login posted them, so a forged marker cannot suppress a real comment. Their block is parsed as JSON and only its own field is compared (`dispatch_id` for closeout and the Mapping dedupe, `pr` for audit): prose in the same comment that names another Dispatch or PR does not count.
+Every other block is skipped, in closeout, audit, recovery, and the dispatch count alike, with a `warning: <owner>/<repo>#123: ignoring a Mapping block: <reason>` line on stderr. An Issue with no trusted block is not in flight. The closeout and audit markers (and the Mapping-comment dedupe in step 2 of dispatch) likewise count only when the authenticated login posted them, so a forged marker cannot suppress a real comment. Their block is parsed as JSON and only its own field is compared (`dispatch_id` for closeout and the Mapping dedupe, `pr` for audit), together with its `hub`, which must be the `hub_id` in `hub.json` (a marker of another Hub, or with no `hub`, counts for nothing): prose in the same comment that names another Dispatch or PR does not count.
 
 ## Closeout
 
@@ -183,15 +183,16 @@ Pull request: https://github.com/<owner>/<repo>/pull/456
 
 Worktree `issue-123-<slug>` (branch `<branch>`) is kept for review.
 
-<!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"succeeded"} -->
+<!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"succeeded","hub":"<hub_id>"} -->
 ```
 
-The PR is `--pr <url|number>`, else the first `https://github.com/<owner>/<repo>/pull/<n>` in the summary, else the open PR whose head is the Mapping block's branch. Whatever the source, it then runs `gh pr view <n> -R <owner>/<repo> --json number,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository,url` and refuses the succeeded closeout, naming the mismatch, unless the PR is:
+The PR is `--pr <url|number>`, else the first `https://github.com/<owner>/<repo>/pull/<n>` in the summary, else the open PR whose head is the Mapping block's branch. Whatever the source, it then runs `gh pr view <n> -R <owner>/<repo> --json number,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository,url,body` and refuses the succeeded closeout, naming the mismatch, unless the PR is:
 
 - `OPEN` (not merged, not closed),
 - in `<owner>/<repo>` (a URL of another repo is refused before the lookup),
 - from a head in `<owner>/<repo>` itself (`isCrossRepository` false; a fork's branch of the same name does not count),
-- on the head branch named by the Mapping block's `branch`.
+- on the head branch named by the Mapping block's `branch`,
+- with a body whose first non-empty line closes this Issue: `Closes #123` (or `Fixes` / `Resolves`, any GitHub closing keyword, any case, optional colon; `#1234` or another Issue does not count). Without it GitHub would not close the Issue on merge, and `issue-audit.sh` would not find the PR.
 
 No open PR means no success: it refuses.
 
@@ -216,7 +217,7 @@ The files section is always rendered. A succeeded closeout with no files (an emp
 
 Worktree `issue-123-<slug>` (branch `<branch>`) is kept for inspection.
 
-<!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"failed"} -->
+<!-- orca-issue-orchestrator-closeout {"v":1,"dispatch_id":"…","outcome":"failed","hub":"<hub_id>"} -->
 ```
 
 Pass `--evidence` with the gist of the report file, or the tail of `orca orchestration worker-read --dispatch <dispatch_id> --limit 50 --json`, rewritten without local paths (or pass `--redact`); the default only points at `worker-read`. Write `--needs` yourself from the report: the information missing from the Issue, or the decision a human must take. `reportPath` is a local path and is never posted. There is no automatic retry; the Issue returns to the Frontier when a human answers and restores `ready-for-agent`.
@@ -258,7 +259,7 @@ For every in-flight Issue (open, assigned to `@me`, with a Mapping block) it fin
 
 It reads every page of the search (`gh api --paginate -X GET search/issues -f q="repo:<owner>/<repo> is:pr is:merged 123 in:body"`) before applying the exact closing-keyword filter, so a broad numeric match cannot push the closing PR past a cap. If gh fails, GitHub marks the search incomplete, or it holds more matches than it returns (GitHub search stops at 1000), it reports that Issue as unchecked, still checks the others, and exits 1 instead of reporting no leftover Issue.
 
-With `--apply` it posts that notice on the Issue, once per PR (marker `<!-- orca-issue-orchestrator-audit {"v":1,"pr":456} -->`). It never closes the Issue; a human does.
+With `--apply` it posts that notice on the Issue, once per PR (marker `<!-- orca-issue-orchestrator-audit {"v":1,"pr":456,"hub":"<hub_id>"} -->`). It never closes the Issue; a human does.
 
 ## Recovery after an Orca restart
 
@@ -273,6 +274,7 @@ scripts/issue-recover.sh --apply    # also re-bind the Run
 1. For every repo in `hub.json`: every page of `gh api graphql --paginate` searching `repo:<owner>/<repo> is:issue is:open assignee:@me orca-issue-orchestrator in:comments` (each Issue with its first 100 comments; a longer thread is read in full with `gh api --paginate repos/<owner>/<repo>/issues/<n>/comments`), keeping Issues with a trusted Mapping block (see [Which blocks are trusted](#which-blocks-are-trusted)).
 2. Read the **latest** trusted block on each Issue (after a retry there are several).
 3. Reconcile: `orca orchestration worker-list --run <run_id> --json` (all pages) for the row of the block's `dispatchId`, and `orca worktree list --json` for the row whose `identity.key` is the block's `worktree_id` and its `linkedIssue`.
+   If `worker-list` fails for any Run, it exits 1 with the error on stderr and binds nothing: an Orca outage must not pass for `unknown`.
 4. Print `orca orchestration run-use --id <run_id> --json`. `--apply` runs it, and nothing else; it prints but skips it when the terminal is already bound to that Run and refuses when the Issues name more than one Run (bind the one you want by hand).
 
 Per Issue it reports the Issue, Run, Task, Dispatch, worktree (`linked`, `unlinked`, or `missing`), the worker row, and a state with its next step:
@@ -284,7 +286,7 @@ Per Issue it reports the Issue, Run, Task, Dispatch, worktree (`linked`, `unlink
 | `failed` | `worker_done` failed | `issue-closeout.sh … failed … --needs` |
 | `working` | no outcome yet, agent `live` | `check --wait` |
 | `inspect` | no outcome, agent not proven live | `worker-show --dispatch`; never stop or retry from absence |
-| `unknown` | the Run has no worker row for the Dispatch | `worker-show --dispatch` |
+| `unknown` | `worker-list` answered, with no row for the Dispatch | `worker-show --dispatch` |
 
 An `unlinked` worktree also gets `orca worktree set --worktree identity:<key> --issue 123 --json` to run yourself. A Task whose newest Dispatch has no Mapping comment is flagged.
 
@@ -306,4 +308,4 @@ npx --yes shellcheck skills/orca-issue-orchestrator/scripts/*.sh skills/orca-iss
   skills/orca-issue-orchestrator/tests/bin/gh skills/orca-issue-orchestrator/tests/bin/orca
 ```
 
-The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths; on closeout success one comment and no label or assignee change, on failure the label add, the unassign, and the comment in that order; `gh issue close` and `task-update` never invoked; recovery uses the latest of two Mapping blocks and runs only `run-use`; forged Mapping blocks from another author, or with a wrong repo, issue, hub, or version, are ignored by closeout, audit, recovery, and the concurrency count; a `--pr` that is merged, from another repo or a fork, or on another head branch refuses; a succeeded closeout without files refuses; a summary, `--evidence`, or `--files` holding `/tmp/…` or `/var/…` refuses unless `--redact`; a retitled Issue keeps the dispatched worktree name; a marker block for another Dispatch or PR, with prose naming ours, suppresses nothing; the in-flight and PR searches find what sits on page 2 or after 100 comments, and fail when GitHub truncates). The fake `gh` answers `gh api user` from `user.json`, serves the in-flight search (`gh api graphql`) from `inflight-<owner>_<repo>.json` and the audit PR search (`gh api search/issues`) from `prs-<owner>_<repo>.json` in pages of `$FAKE_PAGE_SIZE` items (default 100; only the first page without `--paginate`), and answers `gh pr view <n>` from `pr-<owner>_<repo>-<n>.json`. `tests/helpers.sh` holds the shared setup.
+The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths; on closeout success one comment and no label or assignee change, on failure the label add, the unassign, and the comment in that order; `gh issue close` and `task-update` never invoked; recovery uses the latest of two Mapping blocks and runs only `run-use`; forged Mapping blocks from another author, or with a wrong repo, issue, hub, or version, are ignored by closeout, audit, recovery, and the concurrency count; a `--pr` that is merged, from another repo or a fork, or on another head branch refuses, as does a PR whose body does not start with `Closes #<n>` for this Issue; the closeout and audit markers carry the `hub` and a marker of another Hub suppresses nothing; a failing `worker-list` stops recovery; a succeeded closeout without files refuses; a summary, `--evidence`, or `--files` holding `/tmp/…` or `/var/…` refuses unless `--redact`; a retitled Issue keeps the dispatched worktree name; a marker block for another Dispatch or PR, with prose naming ours, suppresses nothing; the in-flight and PR searches find what sits on page 2 or after 100 comments, and fail when GitHub truncates). The fake `gh` answers `gh api user` from `user.json`, serves the in-flight search (`gh api graphql`) from `inflight-<owner>_<repo>.json` and the audit PR search (`gh api search/issues`) from `prs-<owner>_<repo>.json` in pages of `$FAKE_PAGE_SIZE` items (default 100; only the first page without `--paginate`), and answers `gh pr view <n>` from `pr-<owner>_<repo>-<n>.json`. `tests/helpers.sh` holds the shared setup.

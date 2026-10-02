@@ -18,7 +18,8 @@
 # wait for the merge, check with issue-audit.sh), succeeded / failed
 # (worker_done arrived; close it out),
 # working (live agent, no outcome yet), inspect (no outcome, agent not proven
-# live), unknown (the Run has no worker row for the Dispatch).
+# live), unknown (worker-list answered with no row for the Dispatch). A
+# failing worker-list stops it with exit 1: nothing is reported or bound.
 # Exit codes: 0 done (or planned), 1 refused / error.
 
 set -u
@@ -35,7 +36,7 @@ while [ $# -gt 0 ]; do
     --apply) APPLY=1; shift ;;
     --json) as_json=1; shift ;;
     --hub) [ $# -ge 2 ] || die "--hub needs a directory"; hub_arg="$2"; shift 2 ;;
-    -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -85,11 +86,10 @@ runs="$(printf '%s' "$rows" | jq -c '[.[].run_id | select(type == "string" and l
 workers='[]'
 while IFS= read -r run; do
   [ -n "$run" ] || continue
-  if run_workers="$(orca_workers "$run")"; then
-    workers="$(jq -cn --argjson a "$workers" --argjson b "$run_workers" '$a + $b')"
-  else
-    note "warning: worker-list --run $run failed; its Issues show as unknown"
-  fi
+  # "unknown" means Orca answered with no row for the Dispatch; an outage
+  # must not pass for that.
+  run_workers="$(orca_workers "$run")" || die "orca orchestration worker-list --run $run failed; nothing was done"
+  workers="$(jq -cn --argjson a "$workers" --argjson b "$run_workers" '$a + $b')"
 done <<EOF_RUNS
 $(printf '%s' "$runs" | jq -r '.[]')
 EOF_RUNS
