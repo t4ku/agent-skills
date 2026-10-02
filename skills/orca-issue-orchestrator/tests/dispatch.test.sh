@@ -127,8 +127,8 @@ run "$DISPATCH" example/app 7 --hub "$HUB" --apply
 check "concurrency: refuses beyond the limit" code_is 1
 check "concurrency: says why" out_has "concurrency"
 check "concurrency: nothing is claimed" no_mutation
-check "concurrency: counts open Issues assigned to @me with the Mapping marker" \
-  bash -c 'jq -e "select(.[1]==\"issue\" and .[2]==\"list\") | (index(\"--assignee\") as \$i | .[\$i+1] == \"@me\") and (index(\"--state\") as \$i | .[\$i+1] == \"open\") and (map(select(contains(\"orca-issue-orchestrator\"))) | length > 0)" "$FAKE_LOG" >/dev/null'
+check "concurrency: counts open Issues assigned to @me with the Mapping marker, every page" \
+  bash -c 'jq -e "select(.[1]==\"api\" and index(\"graphql\") and index(\"--paginate\")) | map(select(startswith(\"q=\")))[0] | contains(\"is:issue\") and contains(\"is:open\") and contains(\"assignee:@me\") and contains(\"orca-issue-orchestrator\")" "$FAKE_LOG" >/dev/null'
 
 reset_fakes
 printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
@@ -163,6 +163,22 @@ printf 'not json\n' > "$OVR/inflight-example_api.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --apply
 check "concurrency: a failed count refuses (fail closed)" code_is 1
 check "concurrency: a failed count claims nothing" no_mutation
+
+# More in-flight Issues than one page holds: the count reads every page.
+reset_fakes
+jq -c '[{number: 4, comments: [{author: {login: "someone"}, body: "orca-issue-orchestrator, in passing"}]}] + .' \
+  <<< "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
+export FAKE_PAGE_SIZE=1
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply
+check "concurrency, one Issue per page: the in-flight Issue on page 2 counts" code_is 1
+check "concurrency, one Issue per page: nothing is claimed" no_mutation
+
+reset_fakes
+jq -n '{data: {search: {issueCount: 1500, pageInfo: {hasNextPage: false, endCursor: null}, nodes: []}}}' \
+  > "$OVR/inflight-example_api.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply
+check "concurrency, search capped below the Issue count: refuses" code_is 1
+check "concurrency, search capped below the Issue count: nothing is claimed" no_mutation
 
 reset_fakes
 jq '.concurrency = "two"' "$HUB/.orca-hub/hub.json" > "$WORK/hub.json" && cp "$HUB/.orca-hub/hub.json" "$WORK/hub.json.orig" && mv "$WORK/hub.json" "$HUB/.orca-hub/hub.json"
@@ -212,7 +228,7 @@ mapping_block() {
 block_is() {
   mapping_block | jq -e '. == {
     v: 1, repo: "example/app", issue: 7, run_id: "run_test1", task_id: "task_test1",
-    dispatch_id: "ctx_test1", worktree_id: "wt2:local:inst-7",
+    dispatch_id: "ctx_test1", worktree_id: "wt2:local:inst-7", worktree: "issue-7-add-login-page",
     branch: "issue-7-add-login-page", hub: "example-hub"
   }' >/dev/null
 }
@@ -223,6 +239,26 @@ human_lines() {
     grep -qxF -- '- Run `run_test1` / Task `task_test1` / Dispatch `ctx_test1`' "$FAKE_LOG.comment"
 }
 check "receipt apply: the comment has the human-readable lines" human_lines
+
+reset_fakes
+jq '.title = "Renamed after dispatch"' "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply, retitled Issue: the block keeps the started worktree name" \
+  bash -c 'sed -n "s/^<!-- orca-issue-orchestrator \(.*\) -->\$/\1/p" "$FAKE_LOG.comment" | jq -e ".worktree == \"issue-7-add-login-page\"" >/dev/null'
+check "receipt apply, retitled Issue: no recomputed name" \
+  bash -c '! grep -qF issue-7-renamed "$FAKE_LOG.comment"'
+
+reset_fakes
+jq 'del(.result.worker.startOptions)' "$FIXTURES/receipt-ready.json" > "$WORK/receipt-no-name.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$WORK/receipt-no-name.json" --apply
+check "receipt apply, no name in the receipt: the worktree name is the branch" \
+  bash -c 'sed -n "s/^<!-- orca-issue-orchestrator \(.*\) -->\$/\1/p" "$FAKE_LOG.comment" | jq -e ".worktree == \"issue-7-add-login-page\"" >/dev/null'
+
+reset_fakes
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "Replaces \"dispatch_id\":\"ctx_test1\" <!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_other\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a Mapping block of another Dispatch with prose naming ours does not stop it" called "gh issue comment 7"
 
 reset_fakes
 run "$DISPATCH" example/app 7 --hub . --receipt "$FIXTURES/receipt-ready.json" --apply

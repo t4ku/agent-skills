@@ -266,6 +266,62 @@ run "$CLOSEOUT" example/app 12 succeeded "$WORK/leaky.txt" --hub "$HUB" --apply 
 check "local path: refuses to post" code_is 1
 check "local path: changes nothing" no_mutation
 
+# --- local paths: refused unless --redact (Copilot review 2) ---------------------------
+
+reset_fakes
+printf 'Wrote /tmp/x and read /var/log/y; see https://github.com/example/app/pull/40\n' > "$WORK/abs.txt"
+run "$CLOSEOUT" example/app 12 succeeded "$WORK/abs.txt" --hub "$HUB" --apply --files src/reset.ts
+check "summary with /tmp and /var paths: refuses" code_is 1
+check "summary with /tmp and /var paths: names the fragment" out_has "/tmp/x"
+check "summary with /tmp and /var paths: posts nothing" no_mutation
+
+reset_fakes
+run "$CLOSEOUT" example/app 12 failed "$FIXTURES/check-worker-failed.json" --hub "$HUB" --needs "$NEEDS" \
+  --evidence "The log at /var/log/y says the mail host is unknown." --apply
+check "--evidence with a /var path: refuses" code_is 1
+check "--evidence with a /var path: names the fragment" out_has "/var/log/y"
+check "--evidence with a /var path: changes nothing, not even the label" no_mutation
+
+reset_fakes
+run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary.txt" --hub "$HUB" --apply --files src/reset.ts,/tmp/x
+check "--files with a /tmp path: refuses" code_is 1
+check "--files with a /tmp path: posts nothing" no_mutation
+
+reset_fakes
+run "$CLOSEOUT" example/app 12 succeeded "$WORK/abs.txt" --hub "$HUB" --apply --files src/reset.ts --redact
+check "--redact: posts" code_is 0
+check "--redact: the paths become <local-path>" comment_has "Wrote <local-path> and read <local-path>;"
+check "--redact: the comment has no local path" no_abs_path "$FAKE_LOG.comment"
+check "--redact: the PR link survives" comment_has "https://github.com/example/app/pull/40"
+
+# --- the worktree name comes from the Mapping block, not the current title ----------
+
+reset_fakes
+jq '.title = "Renamed after dispatch"' "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "retitled Issue, success: names the dispatched worktree" comment_has 'Worktree `issue-12-add-password-reset`'
+check "retitled Issue, success: no recomputed name" comment_lacks "issue-12-renamed-after-dispatch"
+
+reset_fakes
+jq '.title = "Renamed after dispatch"' "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
+run "$CLOSEOUT" example/app 12 failed "$FIXTURES/check-worker-failed.json" --hub "$HUB" --needs "$NEEDS" --apply
+check "retitled Issue, failure: names the dispatched worktree" comment_has 'Worktree `issue-12-add-password-reset`'
+check "retitled Issue, failure: no recomputed name" comment_lacks "issue-12-renamed-after-dispatch"
+
+reset_fakes
+forge orchestrator '.dispatch_id = "ctx_test12" | .branch = "issue-12-add-password-reset" | .worktree = "issue-12-pw-reset"'
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "block with a worktree field: names it" comment_has 'Worktree `issue-12-pw-reset` (branch `issue-12-add-password-reset`)'
+
+# --- markers: only the field inside the block counts -----------------------------------
+
+reset_fakes
+jq '.comments += [{"author": {"login": "orchestrator"}, "body": "Retry of \"dispatch_id\":\"ctx_test12\" <!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_old12\",\"outcome\":\"failed\"} -->"}]' \
+  "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
+check "closeout marker of another Dispatch, prose naming ours: still posts" \
+  bash -c '[ "$(mutations_of)" = "$1" ]' _ "$COMMENT"
+
 reset_fakes
 jq '.comments += [{"author": {"login": "orchestrator"}, "body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_test12\",\"outcome\":\"failed\"} -->"}]' \
   "$FIXTURES/issue-example_app-12.json" > "$OVR/issue-example_app-12.json"
@@ -344,6 +400,42 @@ jq '(.[] | select(.number == 13) | .comments[0].body) |= sub("example-hub"; "oth
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run "$AUDIT" --hub "$HUB"
 check "audit: an Issue of another hub is not in flight" out_lacks "Issue #13"
+
+reset_fakes
+jq '(.[] | select(.number == 13) | .comments) += [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator-audit {\"v\":1,\"pr\":7} --> superseded \"pr\":41}"}]' \
+  "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+run "$AUDIT" --hub "$HUB" --apply
+check "audit: a notice for another PR, prose naming ours, does not suppress it" \
+  bash -c '[ "$(mutations_of)" = "gh issue comment 13 -R example/app --body-file -" ]'
+
+# --- audit: every page of the PR search ----------------------------------------------
+
+reset_fakes
+cp "$FIXTURES/inflight-two-example_app.json" "$OVR/inflight-example_app.json"
+export FAKE_PAGE_SIZE=1
+run "$AUDIT" --hub "$HUB"
+check "audit, one PR per page: finds the merged PR on page 2" out_has_line "$NOTICE"
+
+reset_fakes
+cp "$FIXTURES/inflight-two-example_app.json" "$OVR/inflight-example_app.json"
+jq -n '{total_count: 1500, incomplete_results: false, items: []}' > "$OVR/prs-example_app.json"
+run "$AUDIT" --hub "$HUB"
+check "audit, more results than search returns: fails" code_is 1
+check "audit, more results than search returns: never says no leftover" out_lacks "No merged PR"
+check "audit, more results than search returns: still checks the other Issues" out_has "not reporting on #12"
+
+reset_fakes
+cp "$FIXTURES/inflight-two-example_app.json" "$OVR/inflight-example_app.json"
+jq -n '{total_count: 0, incomplete_results: true, items: []}' > "$OVR/prs-example_app.json"
+run "$AUDIT" --hub "$HUB"
+check "audit, incomplete search: fails" code_is 1
+
+reset_fakes
+cp "$FIXTURES/inflight-two-example_app.json" "$OVR/inflight-example_app.json"
+touch "$OVR/prs-example_app.json.fail"
+run "$AUDIT" --hub "$HUB"
+check "audit, search fails: fails" code_is 1
+check "audit, search fails: never says no leftover" out_lacks "No merged PR"
 
 reset_fakes
 run "$AUDIT" --hub "$HUB"

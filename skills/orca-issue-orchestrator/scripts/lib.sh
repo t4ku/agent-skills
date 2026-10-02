@@ -152,16 +152,57 @@ $(printf '%s' "$2" | jq -r '.[] | "\(.issue): ignoring a Mapping block: \(.why)"
 EOF_WHY
 }
 
+# The in-flight search, one GraphQL page of Issues at a time, each with its
+# first 100 comments (gh_in_flight fetches the rest of a longer thread).
+# shellcheck disable=SC2016  # GraphQL variables, not shell ones
+IN_FLIGHT_QUERY='query($q: String!, $endCursor: String) {
+  search(query: $q, type: ISSUE, first: 50, after: $endCursor) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on Issue { number title url
+      comments(first: 100) { totalCount nodes { author { login } body } } } }
+  }
+}'
+
 # gh_in_flight <owner/repo>: JSON array of the open Issues assigned to @me
 # that carry a trusted Mapping block (see mapping_latest), as
-# {number, title, url, comments}. Each ignored block gets a stderr line (not
-# with MAPPING_QUIET=1). Returns 1 when gh fails, answers with something that
-# is not a JSON array, or the login is unknown.
+# {number, title, url, comments}. It reads every page of the search and every
+# comment of each Issue. Each ignored block gets a stderr line (not with
+# MAPPING_QUIET=1). Returns 1 when gh fails, answers with something that is
+# not search pages, the search holds fewer Issues than it counts (GitHub
+# search stops at 1000), or the login is unknown: a partial list would hide
+# in-flight work and undercount concurrency.
 gh_in_flight() {
-  local list login scan
+  local list login scan pages n comments
   login="$(gh_login)" || return 1
-  list="$(gh issue list -R "$1" --assignee @me --state open \
-    --search "$MAPPING_MARKER in:comments" --json number,title,url,comments --limit 100)" || return 1
+  pages="$(gh api graphql --paginate -f query="$IN_FLIGHT_QUERY" \
+    -f q="repo:$1 is:issue is:open assignee:@me $MAPPING_MARKER in:comments")" || return 1
+  # {nodes} from every page, or {error}: never a partial list.
+  list="$(printf '%s' "$pages" | jq -cs '
+    if length > 0 and all(.[]; .data.search.nodes? | type == "array") then
+      [.[].data.search.nodes[] | select(.number? != null)] as $nodes
+      | (map(.data.search.issueCount) | max) as $count
+      | if ($count | type) == "number" and $count > ($nodes | length) then
+          {error: "the search returned \($nodes | length) of \($count) Issues (GitHub search stops at 1000)"}
+        else {nodes: $nodes} end
+    else {error: "gh answered with something that is not GraphQL search pages"} end' 2> /dev/null)" || list=""
+  if [ -z "$list" ] || [ -n "$(json_get "$list" '.error')" ]; then
+    note "error: cannot list every in-flight Issue of $1: $(json_get "$list" '.error' 2> /dev/null || true)"
+    return 1
+  fi
+  list="$(json_get "$list" '.nodes' -c)"
+  # A thread longer than the first page of comments: read all of it.
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    comments="$(gh api --paginate "repos/$1/issues/$n/comments?per_page=100")" || return 1
+    comments="$(printf '%s' "$comments" | jq -cs 'if all(.[]; type == "array") then add // [] else error("not arrays") end
+      | map({author: {login: (.user.login? // "")}, body: (.body // "")})' 2> /dev/null)" || return 1
+    list="$(printf '%s' "$list" | jq -c --argjson n "$n" --argjson c "$comments" \
+      'map(if .number == $n then .comments = {totalCount: ($c | length), nodes: $c} else . end)')" || return 1
+  done <<EOF_LONG
+$(printf '%s' "$list" | jq -r '.[] | select((.comments.totalCount // 0) > (.comments.nodes // [] | length)) | .number')
+EOF_LONG
+  list="$(printf '%s' "$list" | jq -c 'map(.comments = (.comments.nodes // []))')" || return 1
   # The search also hits comments that merely mention the marker, and anyone
   # can post a marker; keep only Issues with a trusted Mapping block.
   scan="$(printf '%s' "$list" | jq -ce --arg m "$MAPPING_MARKER" --arg login "$login" --arg repo "$1" \
@@ -249,28 +290,63 @@ mapping_latest() {
   printf '%s' "$block"
 }
 
-# has_marker_comment <json with .comments[]> <marker> <fragment>: true when a
-# comment by the authenticated orchestrator holds a `<!-- <marker> {...} -->`
-# block containing <fragment>. Other authors' markers are ignored.
+# has_marker_comment <json with .comments[]> <marker> <field> <value>: true
+# when a comment by the authenticated orchestrator holds a
+# `<!-- <marker> {...} -->` block whose <field> is <value> (compared as text).
+# Only the parsed block counts: prose around it that names another id does
+# not. Other authors' markers are ignored.
 has_marker_comment() {
   local login
   login="$(gh_login)" || return 1
-  # shellcheck disable=SC2016  # $login is a jq variable
-  json_get "$1" '.comments[]? | select(.author.login? == $login) | .body' --arg login "$login" |
-    grep -F "<!-- $2 " | grep -qF -- "$3"
+  # shellcheck disable=SC2016  # jq variables
+  printf '%s' "$1" | jq -e --arg login "$login" --arg m "$2" --arg f "$3" --arg v "$4" '
+    any(.comments[]? | select(.author.login? == $login) | (.body // "")
+      | scan("<!-- " + $m + " (\\{.*?\\}) -->") | .[0] | (try fromjson catch null);
+      type == "object" and has($f) and (.[$f] | tostring) == $v)' > /dev/null 2>&1
 }
 
-# has_local_path <text>: true when the text holds the Hub folder path, its
-# hub.json hub_path, the home directory, or a <repo-id>::/<path> worktree id.
-# Public comments must never carry one.
-has_local_path() {
-  local hub_path
-  hub_path="$(hub_get '.hub_path // empty')"
-  case "$1" in
-    *::/* | *"$HUB_DIR"* | *"${hub_path:-$HUB_DIR}"* | *"${HOME:-$HUB_DIR}"*) return 0 ;;
-  esac
-  return 1
+# --- local paths ------------------------------------------------------------------
+
+# Public comments must never carry a local path. LOCAL_PATH_RE (a jq regex)
+# matches an absolute path under a common local root (/Users, /home, /tmp,
+# /private, /var, /opt, /srv, /mnt, /root, /Volumes, and the /path placeholder) or a <repo-id>::/<path> worktree
+# id (not an IPv6 prefix such as ::/0), up to the next space, quote, bracket, or backtick (trailing sentence
+# punctuation excluded). local_path_scan adds the Hub folder, its hub.json
+# hub_path, and $HOME. tests/helpers.sh uses the same functions, so the tests
+# and the guard cannot drift apart.
+_LP_STOP="\\s\`'\"<>()\\[\\]"
+_LP_TAIL="[^$_LP_STOP]*?(?=[.,;:!?]*(?:[$_LP_STOP]|\$))"
+LOCAL_PATH_RE="(?<![A-Za-z0-9_.-])/(?:path|Users|home|tmp|private|var|opt|srv|mnt|root|Volumes)/$_LP_TAIL|[^$_LP_STOP]*::/(?![0-9])$_LP_TAIL"
+
+# local_path_scan <find|redact> <text>: find prints the first local path in
+# the text (nothing when there is none); redact prints the text with each one
+# replaced by <local-path>.
+local_path_scan() {
+  local hub_path=""
+  # An unreadable hub.json fails the scan (the caller then refuses), never
+  # drops hub_path from it.
+  if [ -n "${HUB_JSON:-}" ]; then hub_path="$(hub_get '.hub_path // empty')" || return 1; fi
+  # shellcheck disable=SC2016  # jq variables
+  printf '%s' "$2" | jq -Rrs --arg mode "$1" --arg re "$LOCAL_PATH_RE" --arg tail "$_LP_TAIL" \
+    --arg lits "$(printf '%s\n' "${HUB_DIR:-}" "$hub_path" "${HOME:-}")" '
+    ([$lits | split("\n")[] | select(startswith("/") and length > 1)
+      | gsub("(?<c>[.^$|?*+(){}\\[\\]\\\\])"; "\\\(.c)") + $tail] + [$re] | join("|")) as $all
+    | if $mode == "redact" then gsub($all; "<local-path>")
+      else (first(match($all; "g").string) // empty) end'
 }
+
+# local_path_fragment <text>: print the first local path in the text and
+# return 0; return 1 when there is none. A text that cannot be scanned counts
+# as holding one.
+local_path_fragment() {
+  local frag
+  frag="$(local_path_scan find "$1")" || frag="(the text could not be scanned)"
+  [ -n "$frag" ] || return 1
+  printf '%s\n' "$frag"
+}
+
+# redact_local_paths <text>: the text with each local path replaced by <local-path>.
+redact_local_paths() { local_path_scan redact "$1"; }
 
 # read_input <file|->: print a file, or stdin for "-".
 read_input() {

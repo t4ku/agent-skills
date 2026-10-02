@@ -36,6 +36,43 @@ value_of() {
   done
 }
 
+# value_of_prefix <prefix> <args...>: the rest of the first argument that
+# starts with <prefix> (e.g. q= of `-f q=...`).
+value_of_prefix() {
+  local prefix="$1"
+  shift
+  for arg in "$@"; do
+    case "$arg" in "$prefix"*) printf '%s' "${arg#"$prefix"}"; return ;; esac
+  done
+}
+
+# pages <graphql|search|rest> <json> <args...>: serve a JSON array as the pages
+# of that API, $FAKE_PAGE_SIZE (default 100) items each, one JSON document per
+# page as `gh api --paginate` prints them; without --paginate only the first
+# page. graphql pages are a GraphQL Issue search (comments as {totalCount,
+# nodes} capped at 100), search pages a REST search/issues answer built from
+# `gh pr list` rows. A fixture that is not an array is printed as it is.
+pages() {
+  local kind="$1" data="$2" all=false
+  shift 2
+  for arg in "$@"; do [ "$arg" != --paginate ] || all=true; done
+  printf '%s' "$data" | jq -c --arg kind "$kind" --argjson size "${FAKE_PAGE_SIZE:-100}" --argjson all "$all" '
+    def page($s; $n; $items):
+      if $kind == "graphql" then {data: {search: {issueCount: $n,
+          pageInfo: {hasNextPage: ($s + $size < $n), endCursor: "cursor\($s + $size)"},
+          nodes: ($items | map(. + {comments: {totalCount: (.comments // [] | length),
+            nodes: ((.comments // [])[:100])}}))}}}
+      elif $kind == "search" then {total_count: $n, incomplete_results: false,
+        items: ($items | map({number, html_url: .url, body,
+          state: (if .state == "OPEN" then "open" else "closed" end),
+          pull_request: {merged_at: (if .state == "MERGED" then "2026-01-01T00:00:00Z" else null end)}}))}
+      else $items end;
+    if type == "array" then
+      length as $n | [range(0; [$n, 1] | max; $size) as $s | page($s; $n; .[$s:$s + $size])]
+      | if $all then .[] else .[0] end
+    else . end'
+}
+
 case "${1:-} ${2:-}" in
   "issue view")
     fixture "issue-$(repo_key "$(value_of -R "$@")")-$3.json"
@@ -71,14 +108,42 @@ case "${1:-} ${2:-}" in
     printf '%s' "$user" | jq -r "${filter:-.}"
     ;;
   "api "*)
-    # gh api [--paginate] repos/<owner>/<repo>/issues?... -> issues-<owner>_<repo>.json
-    path=""
+    # The first of graphql, search/*, or repos/* names the endpoint.
+    target=""
     for arg in "$@"; do
-      case "$arg" in repos/*) path="$arg" ;; esac
+      case "$arg" in graphql | search/* | repos/*) [ -n "$target" ] || target="$arg" ;; esac
     done
-    path="${path%%\?*}"
-    path="${path#repos/}"
-    fixture "issues-$(repo_key "${path%/issues}").json"
+    q="$(value_of_prefix q= "$@")"
+    q_repo="$(printf '%s' "$q" | sed -nE 's/.*repo:([^ ]+).*/\1/p')"
+    case "$target" in
+      graphql)
+        # The in-flight search: inflight-<owner>_<repo>.json as search pages.
+        data="$(fixture "inflight-$(repo_key "$q_repo").json")" || exit 1
+        pages graphql "$data" "$@"
+        ;;
+      search/issues)
+        # The PR search of issue-audit: prs-<owner>_<repo>.json as search pages.
+        data="$(fixture "prs-$(repo_key "$q_repo").json")" || exit 1
+        pages search "$data" "$@"
+        ;;
+      repos/*/issues/*/comments*)
+        # Every comment of one Issue, from its entry in inflight-<owner>_<repo>.json.
+        path="${target%%\?*}"
+        path="${path#repos/}"
+        n="${path%/comments}"
+        n="${n##*/}"
+        data="$(fixture "inflight-$(repo_key "${path%/issues/*}").json")" || exit 1
+        data="$(printf '%s' "$data" | jq -c --argjson n "$n" \
+          '[first(.[] | select(.number == $n)) | .comments[]? | {user: {login: .author.login}, body}]')" || exit 1
+        pages rest "$data" "$@"
+        ;;
+      *)
+        # gh api [--paginate] repos/<owner>/<repo>/issues?... -> issues-<owner>_<repo>.json
+        path="${target%%\?*}"
+        path="${path#repos/}"
+        fixture "issues-$(repo_key "${path%/issues}").json"
+        ;;
+    esac
     ;;
   *)
     printf 'fake gh: unexpected call: %s\n' "$*" >&2

@@ -4,7 +4,7 @@
 # Usage:
 #   issue-closeout.sh <owner/repo> <n> <succeeded|failed> <summary-file|-> [--apply]
 #                     [--pr <url>] [--files <a,b,...>] [--needs <text>] [--evidence <text>]
-#                     [--hub <hub-dir>]
+#                     [--redact] [--hub <hub-dir>]
 #
 # <summary-file> is either the `orca orchestration check --json` output that
 # holds the worker_done (heartbeats and other Dispatches are ignored; the
@@ -29,6 +29,9 @@
 #   --needs     failed only, required with --apply: what a human must supply
 #   --evidence  failed only: the evidence line (default: where Orca keeps the
 #               Worker's output)
+#   --redact    Replace each local path in the comment with <local-path>.
+#               Without it a comment holding one (/Users/..., /tmp/...,
+#               /var/..., the Hub folder, $HOME, a ::/ worktree id) is refused.
 #   --hub       Hub folder (default: $CLAUDE_PROJECT_DIR, else the current directory)
 #
 # Exit codes: 0 done (or planned, or already closed out), 1 refused / error.
@@ -47,24 +50,26 @@ pr_url=""
 files_arg=""
 needs=""
 evidence=""
+redact=0
 positional=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1; shift ;;
+    --redact) redact=1; shift ;;
     --hub) [ $# -ge 2 ] || die "--hub needs a directory"; hub_arg="$2"; shift 2 ;;
     --pr) [ $# -ge 2 ] || die "--pr needs a URL"; pr_url="$2"; shift 2 ;;
     --files) [ $# -ge 2 ] || die "--files needs a list"; files_arg="$2"; shift 2 ;;
     --needs) [ $# -ge 2 ] || die "--needs needs a text"; needs="$2"; shift 2 ;;
     --evidence) [ $# -ge 2 ] || die "--evidence needs a text"; evidence="$2"; shift 2 ;;
-    -h | --help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -?*) die "unknown option: $1" ;;
     *) positional+=("$1"); shift ;;
   esac
 done
 
 [ "${#positional[@]}" -eq 4 ] ||
-  die "usage: issue-closeout.sh <owner/repo> <n> <succeeded|failed> <summary-file|-> [--apply] [--pr <url>] [--files <list>] [--needs <text>] [--evidence <text>] [--hub <hub-dir>]"
+  die "usage: issue-closeout.sh <owner/repo> <n> <succeeded|failed> <summary-file|-> [--apply] [--pr <url>] [--files <list>] [--needs <text>] [--evidence <text>] [--redact] [--hub <hub-dir>]"
 repo="${positional[0]}"
 number="${positional[1]}"
 outcome="${positional[2]}"
@@ -89,7 +94,11 @@ block="$(mapping_latest "$issue" "$repo")" || die "cannot read the Mapping block
 dispatch_id="$(json_get "$block" '.dispatch_id')"
 branch="$(json_get "$block" '.branch')"
 [ -n "$dispatch_id" ] || die "the latest Mapping block on $repo#$number has no dispatch_id"
-name="$(worktree_name "$number" "$(json_get "$issue" '.title')")"
+# The worktree as dispatched, from the block; never recomputed from the title,
+# which may have changed since. Blocks older than the worktree field name the
+# branch, which Orca derived from the worktree name.
+name="$(json_get "$block" '.worktree | strings')"
+[ -n "$name" ] || name="$branch"
 
 release_cmd() {
   printf '\n# Release the Worker'"'"'s terminal (run it yourself; this script never does)\n'
@@ -102,7 +111,7 @@ release_cmd() {
 printf 'Closeout for %s#%s, Dispatch %s, %s (%s):\n\n' "$repo" "$number" "$dispatch_id" "$outcome" "$mode"
 
 # Post once per Dispatch: a rerun (even after the PR merged) changes nothing.
-if has_marker_comment "$issue" "$CLOSEOUT_MARKER" "\"dispatch_id\":\"$dispatch_id\""; then
+if has_marker_comment "$issue" "$CLOSEOUT_MARKER" dispatch_id "$dispatch_id"; then
   printf 'A closeout comment for Dispatch %s is already on the Issue; changing nothing.\n' "$dispatch_id"
   release_cmd
   exit 0
@@ -224,10 +233,15 @@ else
   )"
 fi
 
-has_local_path "$body" && die "refusing to post: the comment would contain a local path; rewrite the summary or pass --evidence"
-
-
-
+# Every string in the body (summary, evidence, files, worktree and branch
+# names) is checked before anything changes.
+if frag="$(local_path_fragment "$body")"; then
+  [ "$redact" -eq 1 ] ||
+    die "refusing to post: the comment would contain the local path $frag; rewrite the summary, --evidence, or --files, or pass --redact"
+  body="$(redact_local_paths "$body")" || die "cannot redact the local paths; nothing was done"
+  if frag="$(local_path_fragment "$body")"; then die "a local path survived --redact: $frag; nothing was done"; fi
+  note "note: --redact replaced each local path in the comment with <local-path>"
+fi
 
 if [ "$outcome" = "failed" ]; then
   # Label first: if the unassign then fails, the Issue is still out of the Frontier.

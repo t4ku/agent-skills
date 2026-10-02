@@ -4,7 +4,9 @@
 # Source it from a tests/*.test.sh file. It builds a temporary Hub folder,
 # puts the fake `gh` and `orca` (tests/bin/) first on PATH, and defines the
 # run / check / call-log helpers. The fakes answer from tests/fixtures/ and
-# append every argv to $FAKE_LOG, one JSON array per line.
+# append every argv to $FAKE_LOG, one JSON array per line. The paginated
+# `gh api` answers come in pages of $FAKE_PAGE_SIZE (default 100) items;
+# reset_fakes unsets it.
 # Dependencies: bash, jq, coreutils.
 
 # The bash -c snippets expand their variables in the child shell.
@@ -50,6 +52,7 @@ reset_fakes() {
   : > "$FAKE_LOG"
   rm -f "$FAKE_LOG.comment"
   rm -rf "$OVR"
+  unset FAKE_PAGE_SIZE
   mkdir -p "$OVR"
   export FAKE_OVERRIDES="$OVR"
 }
@@ -105,8 +108,17 @@ call_line() { calls | awk -v p="$1" 'index($0, p) == 1 { print NR; exit }'; }
 called() { [ -n "$(call_line "$1")" ]; }
 not_called() { ! called "$1"; }
 
-# no_abs_path <file>: the file holds no local path.
-no_abs_path() { ! grep -Eq '(^|[^A-Za-z0-9_.-])/(path|Users|home|tmp|private|var)/|::/' "$1" && ! grep -qF "$HUB" "$1"; }
+# no_abs_path <file>: the file holds no local path, by the classifier the
+# scripts use before posting (local_path_fragment in scripts/lib.sh), with the
+# test Hub as the Hub folder.
+no_abs_path() {
+  ! (
+    HUB_DIR="$HUB"
+    # shellcheck source=../scripts/lib.sh disable=SC1091
+    . "$SCRIPTS/lib.sh"
+    local_path_fragment "$(cat "$1")" > /dev/null
+  )
+}
 
 # summary: print the tally; return non-zero when a check failed.
 summary() {

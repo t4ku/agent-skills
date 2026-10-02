@@ -56,7 +56,7 @@ while IFS= read -r repo; do
     block="$(MAPPING_QUIET=1 mapping_latest "$issue" "$repo")" || die "cannot read the Mapping blocks on $repo; nothing was done"
     [ -n "$block" ] || continue
     closed_out=false
-    has_marker_comment "$issue" "$CLOSEOUT_MARKER" "\"dispatch_id\":\"$(json_get "$block" '.dispatch_id')\"" &&
+    has_marker_comment "$issue" "$CLOSEOUT_MARKER" dispatch_id "$(json_get "$block" '.dispatch_id')" &&
       closed_out=true
     rows="$(jq -cn --argjson rows "$rows" --arg repo "$repo" --argjson i "$issue" --argjson b "$block" \
       --argjson closed "$closed_out" '

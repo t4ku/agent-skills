@@ -38,10 +38,10 @@ run "$RECOVER" --hub "$HUB"
 check "dry-run: exits 0" code_is 0
 check "dry-run: prints run-use for the Run on the Issues" out_has_line "$RUN_USE"
 check "dry-run: makes no mutation" no_mutation
-check "dry-run: lists open Issues assigned to @me carrying the marker" \
-  bash -c 'jq -e "select(.[1]==\"issue\" and .[2]==\"list\") | (index(\"--assignee\") as \$i | .[\$i+1] == \"@me\") and (index(\"--state\") as \$i | .[\$i+1] == \"open\") and (map(select(contains(\"orca-issue-orchestrator\"))) | length > 0)" "$FAKE_LOG" >/dev/null'
+check "dry-run: lists open Issues assigned to @me carrying the marker, every page" \
+  bash -c 'jq -e "select(.[1]==\"api\" and index(\"graphql\") and index(\"--paginate\")) | map(select(startswith(\"q=\")))[0] | contains(\"is:issue\") and contains(\"is:open\") and contains(\"assignee:@me\") and contains(\"orca-issue-orchestrator\")" "$FAKE_LOG" >/dev/null'
 check "dry-run: reads every configured repo" \
-  bash -c 'jq -e "select(.[1]==\"issue\" and .[2]==\"list\") | index(\"example/api\")" "$FAKE_LOG" >/dev/null'
+  bash -c 'jq -e "select(.[1]==\"api\" and index(\"graphql\")) | map(select(startswith(\"q=\")))[0] | contains(\"repo:example/api \")" "$FAKE_LOG" >/dev/null'
 check "dry-run: reconciles with worker-list --run" called "orca orchestration worker-list --run run_test12"
 check "dry-run: reconciles with worktree list" called "orca worktree list"
 check "dry-run: names the Issue" out_has "example/app#12"
@@ -128,6 +128,35 @@ check "two Runs: refuses to pick one" code_is 1
 check "two Runs: binds nothing" no_mutation
 check "two Runs: prints both run-use commands" \
   bash -c 'printf "%s\n" "$1" | grep -qxF "$2" && printf "%s\n" "$1" | grep -qxF "orca orchestration run-use --id run_other --json"' _ "$OUT" "$RUN_USE"
+
+reset_fakes
+jq '(.[] | select(.number == 12) | .comments) += [{"author": {"login": "orchestrator"}, "body": "Supersedes \"dispatch_id\":\"ctx_test12\" <!-- orca-issue-orchestrator-closeout {\"v\":1,\"dispatch_id\":\"ctx_old12\",\"outcome\":\"failed\"} -->"}]' \
+  "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+run_json --hub "$HUB" --json
+check "closeout marker of another Dispatch, prose naming ours: not closed out" row 12 '.state == "succeeded"'
+
+# --- every page of the in-flight search ---------------------------------------------
+
+reset_fakes
+in_flight_two
+export FAKE_PAGE_SIZE=1
+run_json --hub "$HUB" --json
+check "one Issue per page: both Issues are recovered" \
+  bash -c 'printf "%s" "$1" | jq -e "[.issues[].issue] == [12, 13]" >/dev/null' _ "$OUT"
+
+reset_fakes
+jq '(.[] | select(.number == 13) | .comments) |= [range(120) | {author: {login: "someone"}, body: "+1"}] + .' \
+  "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
+export FAKE_PAGE_SIZE=50
+run_json --hub "$HUB" --json
+check "Mapping block after 120 comments: the Issue is recovered" row 13 '.dispatch_id == "ctx_test13"'
+
+reset_fakes
+jq -n '{data: {search: {issueCount: 1500, pageInfo: {hasNextPage: false, endCursor: null}, nodes: []}}}' \
+  > "$OVR/inflight-example_app.json"
+run "$RECOVER" --hub "$HUB" --apply
+check "search capped below the Issue count: refuses" code_is 1
+check "search capped below the Issue count: never says nothing is in flight" out_lacks "No in-flight Issues"
 
 # --- Mapping trust ----------------------------------------------------------------
 
