@@ -192,7 +192,7 @@ The PR is `--pr <url|number>`, else the first `https://github.com/<owner>/<repo>
 - in `<owner>/<repo>` (a URL of another repo is refused before the lookup),
 - from a head in `<owner>/<repo>` itself (`isCrossRepository` false; a fork's branch of the same name does not count),
 - on the head branch named by the Mapping block's `branch`,
-- with a body whose first non-empty line closes this Issue: `Closes #123` (or `Fixes` / `Resolves`, any GitHub closing keyword, any case, optional colon; `#1234` or another Issue does not count). Without it GitHub would not close the Issue on merge, and `issue-audit.sh` would not find the PR.
+- with a body whose first non-empty line closes this Issue: `Closes #123` (or `Fixes` / `Resolves`, any GitHub closing keyword, any case, optional colon; `#1234` or another Issue does not count). This is the success invariant (the PR body starts with `Closes #123`); a PR without a closing keyword would not close the Issue on merge.
 
 No open PR means no success: it refuses.
 

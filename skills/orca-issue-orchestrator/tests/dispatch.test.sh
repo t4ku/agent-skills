@@ -273,6 +273,12 @@ check "receipt apply: does not post a second Mapping comment for the same Dispat
 check "receipt apply: says the comment exists" out_has "already"
 
 reset_fakes
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"other-hub\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a Mapping comment of another Hub does not stop it" called "gh issue comment 7"
+
+reset_fakes
 jq '.comments = [range(100) | {author: {login: "someone"}, body: "+1"}]
     + [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"

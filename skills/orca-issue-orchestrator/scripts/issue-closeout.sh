@@ -202,7 +202,7 @@ validate_pr() {
   first_line="$(json_get "$view" '.body // "" | split("\n") | map(select(test("\\S"))) | first // ""')"
   printf '%s' "$first_line" | jq -Rse --arg n "$number" \
     'test("^\\s*(close[sd]?|fix(e[sd])?|resolve[sd]?):?\\s+#" + $n + "\\b"; "i")' > /dev/null ||
-    die "PR #$n of $repo ($src) does not start its body with \`Closes #$number\` (first line: '${first_line:-empty}'); GitHub would not close the Issue on merge and issue-audit.sh would not find the PR; refusing a succeeded closeout"
+    die "PR #$n of $repo ($src) does not start its body with \`Closes #$number\` (first line: '${first_line:-empty}'); success needs a PR that closes the Issue (SKILL.md); refusing a succeeded closeout"
 }
 
 if [ "$outcome" = "succeeded" ]; then
