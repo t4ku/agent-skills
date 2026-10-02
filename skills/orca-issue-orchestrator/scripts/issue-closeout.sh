@@ -84,7 +84,7 @@ if [ "$APPLY" -eq 1 ]; then mode="apply"; else mode="dry-run; add --apply to act
 
 issue="$(gh issue view "$number" -R "$repo" --json number,title,state,url,labels,comments)" ||
   die "cannot read $repo#$number"
-block="$(mapping_latest "$issue" "$repo")"
+block="$(mapping_latest "$issue" "$repo")" || die "cannot read the Mapping blocks on $repo#$number"
 [ -n "$block" ] || die "$repo#$number has no Mapping comment; nothing to close out"
 dispatch_id="$(json_get "$block" '.dispatch_id')"
 branch="$(json_get "$block" '.branch')"
@@ -141,12 +141,10 @@ fi
 
 closeout_block="$(jq -cn --arg d "$dispatch_id" --arg o "$outcome" '{v: 1, dispatch_id: $d, outcome: $o}')"
 
-# lower <text>: ASCII lowercase (GitHub owner and repo names are case-insensitive).
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-
 # validate_pr <url|number> <source>: resolve the PR with gh pr view and refuse
-# unless it is OPEN, in $repo, and its head is the Mapping branch of $repo
-# itself (not a fork). Sets pr_url to the PR's canonical URL.
+# unless it is OPEN, in $repo, and its head is the Mapping $branch of $repo
+# itself (not a fork). Reads $repo and $branch; sets pr_url to the PR's
+# canonical URL.
 validate_pr() {
   local ref="$1" src="$2" n pr_repo view state head head_repo cross
   case "$ref" in
@@ -167,7 +165,7 @@ validate_pr() {
   cross="$(json_get "$view" '.isCrossRepository | tostring')"
   pr_url="$(json_get "$view" '.url')"
   [ "$(lower "$pr_url")" = "$(lower "https://github.com/$repo/pull/$n")" ] ||
-    die "PR #$n of $repo ($src) answers with URL ${pr_url:-none}, not https://github.com/$repo/pull/$n; refusing a succeeded closeout"
+    die "PR #$n of $repo ($src) answers with URL ${pr_url:-none}, not https://github.com/$repo/pull/$n (renamed or transferred repo, or another host?); refusing a succeeded closeout"
   [ "$state" = "OPEN" ] ||
     die "PR #$n of $repo ($src) is ${state:-in an unknown state}, not OPEN; success needs an open PR"
   [ "$cross" = "false" ] && [ "$(lower "$head_repo")" = "$(lower "$repo")" ] ||
@@ -183,7 +181,7 @@ if [ "$outcome" = "succeeded" ]; then
     pr_src="--pr"
   else
     repo_re="$(printf '%s' "$repo" | sed 's/[.]/\\./g')"
-    pr_url="$(printf '%s\n' "$summary" | grep -Eio "https://github\.com/$repo_re/pull/[0-9]+" | head -1)"
+    pr_url="$(printf '%s\n' "$summary" | grep -Eo "https://github\.com/$repo_re/pull/[0-9]+" | head -1)"
     pr_src="the summary"
   fi
   if [ -z "$pr_url" ] && [ -n "$branch" ]; then

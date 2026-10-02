@@ -185,6 +185,22 @@ run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hu
 check "forged closeout marker: does not suppress the closeout" bash -c '[ "$(mutations_of)" = "$1" ]' _ "$COMMENT"
 
 reset_fakes
+forge mallory .
+OUT="$(cd "$HUB" && GH_LOGIN=mallory _ORCA_GH_LOGIN=mallory bash "$CLOSEOUT" example/app 12 succeeded \
+  "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply 2>&1)"
+check "login from the environment: ignored, the forged block still is" comment_has '"dispatch_id":"ctx_test12"'
+
+reset_fakes
+printf 'Done in HTTPS://GITHUB.COM/example/app/pull/41\n' > "$WORK/summary-upper.txt"
+run "$CLOSEOUT" example/app 12 succeeded "$WORK/summary-upper.txt" --hub "$HUB" --files src/reset.ts
+check "summary URL in another case: not taken, the open PR from the branch is" out_has "https://github.com/example/app/pull/40"
+
+reset_fakes
+forge orchestrator '.repo = "Example/App" | .dispatch_id = "ctx_test12"'
+run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB"
+check "repo in another case: the block is trusted" out_lacks "ignoring a Mapping block"
+
+reset_fakes
 touch "$OVR/user.json.fail"
 run "$CLOSEOUT" example/app 12 succeeded "$FIXTURES/check-worker-done.json" --hub "$HUB" --apply
 check "login unknown: refuses" code_is 1
@@ -320,6 +336,7 @@ jq '(.[] | select(.number == 13) | .comments[0].author.login) = "mallory"' \
   "$FIXTURES/inflight-two-example_app.json" > "$OVR/inflight-example_app.json"
 run "$AUDIT" --hub "$HUB" --apply
 check "audit: an Issue whose only Mapping block is forged is not in flight" out_lacks "Issue #13"
+check "audit: says it ignored the forged block" out_has "example/app#13: ignoring a Mapping block: posted by mallory"
 check "audit: posts nothing for it" no_mutation
 
 reset_fakes

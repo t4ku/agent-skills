@@ -146,10 +146,10 @@ Anyone can comment on a public Issue, so a copied or forged block must not make 
 
 - The comment's author is the login gh is authenticated as (`gh api user --jq .login`, looked up once per run). If it cannot be read, the script refuses.
 - `v` is `1`.
-- `repo` is the Issue's `<owner>/<repo>` and `issue` is its number.
-- `hub` is the `hub_id` in `hub.json` (without a loaded `hub.json`, any non-empty `hub` is accepted and its value is logged).
+- `repo` is the Issue's `<owner>/<repo>` (case-insensitive, as on GitHub) and `issue` is its number.
+- `hub` is the `hub_id` in `hub.json`. (Every script loads a `hub.json`; the shared check, run without one, would accept any non-empty `hub` and log it.)
 
-Every other block is skipped with a `warning: <owner>/<repo>#123: ignoring a Mapping block: <reason>` line on stderr. An Issue with no trusted block is not in flight. The closeout and audit markers (and the Mapping-comment dedupe in step 2 of dispatch) likewise count only when the authenticated login posted them, so a forged marker cannot suppress a real comment.
+Every other block is skipped, in closeout, audit, recovery, and the dispatch count alike, with a `warning: <owner>/<repo>#123: ignoring a Mapping block: <reason>` line on stderr. An Issue with no trusted block is not in flight. The closeout and audit markers (and the Mapping-comment dedupe in step 2 of dispatch) likewise count only when the authenticated login posted them, so a forged marker cannot suppress a real comment.
 
 ## Closeout
 

@@ -52,7 +52,8 @@ while IFS= read -r repo; do
   issues="$(gh_in_flight "$repo")" || die "cannot list the in-flight Issues of $repo; nothing was done"
   while IFS= read -r issue; do
     [ -n "$issue" ] || continue
-    block="$(mapping_latest "$issue" "$repo")"
+    # gh_in_flight already warned about every ignored block.
+    block="$(MAPPING_QUIET=1 mapping_latest "$issue" "$repo")" || die "cannot read the Mapping blocks on $repo; nothing was done"
     [ -n "$block" ] || continue
     closed_out=false
     has_marker_comment "$issue" "$CLOSEOUT_MARKER" "\"dispatch_id\":\"$(json_get "$block" '.dispatch_id')\"" &&

@@ -148,6 +148,7 @@ for case_ in 'another author|mallory|.' 'wrong repo|orchestrator|.repo = "exampl
   in_flight_api "${rest%%|*}" "${rest#*|}" > "$OVR/inflight-example_api.json"
   run "$DISPATCH" example/app 7 --hub "$HUB"
   check "concurrency: a forged Mapping block (${case_%%|*}) does not count" code_is 0
+  check "concurrency: a forged Mapping block (${case_%%|*}) is reported" out_has "example/api#5: ignoring a Mapping block"
 done
 
 reset_fakes

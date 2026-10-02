@@ -21,6 +21,9 @@ AUDIT_MARKER="$MAPPING_MARKER-audit"
 
 # Set to 1 by a script's --apply flag.
 APPLY=0
+# The authenticated gh login (gh_login). Reset here so an inherited
+# environment value can never stand in for the real lookup.
+_ORCA_GH_LOGIN=""
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -65,6 +68,9 @@ json_get() {
   shift 2
   printf '%s' "$json" | jq -r "$@" "($filter) // empty"
 }
+
+# lower <text>: ASCII lowercase (GitHub owner and repo names are case-insensitive).
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 # --- dry-run / --apply ----------------------------------------------------------
 
@@ -118,37 +124,54 @@ gh_default_branch() {
 }
 
 # gh_login: the login gh is authenticated as, the only author whose marker
-# comments are trusted. Looked up once: the first call outside a command
-# substitution caches it in GH_LOGIN (gh_login_load does that and dies on
-# failure). Returns 1 when gh cannot tell.
+# comments are trusted. Looked up once per run: gh_login_load caches it in
+# _ORCA_GH_LOGIN (a call inside a command substitution cannot). Returns 1 when
+# gh cannot tell.
 gh_login() {
-  if [ -z "${GH_LOGIN:-}" ]; then
-    GH_LOGIN="$(gh api user --jq .login 2> /dev/null)" || GH_LOGIN=""
+  if [ -z "$_ORCA_GH_LOGIN" ]; then
+    _ORCA_GH_LOGIN="$(gh api user --jq .login 2> /dev/null)" || _ORCA_GH_LOGIN=""
   fi
-  [ -n "$GH_LOGIN" ] || return 1
-  printf '%s\n' "$GH_LOGIN"
+  [ -n "$_ORCA_GH_LOGIN" ] || return 1
+  printf '%s\n' "$_ORCA_GH_LOGIN"
 }
 
-# gh_login_load: cache gh_login for this run; die when gh cannot tell.
+# gh_login_load: look the login up now and cache it; die when gh cannot tell.
 gh_login_load() {
+  _ORCA_GH_LOGIN=""
   gh_login > /dev/null || die "cannot read the authenticated gh login (gh api user); run: gh auth status"
+}
+
+# mapping_warn <owner/repo> <JSON array of {issue, why}>: one stderr line per
+# ignored Mapping block.
+mapping_warn() {
+  local line
+  while IFS= read -r line; do
+    [ -z "$line" ] || note "warning: $1#$line"
+  done <<EOF_WHY
+$(printf '%s' "$2" | jq -r '.[] | "\(.issue): ignoring a Mapping block: \(.why)"')
+EOF_WHY
 }
 
 # gh_in_flight <owner/repo>: JSON array of the open Issues assigned to @me
 # that carry a trusted Mapping block (see mapping_latest), as
-# {number, title, url, comments}. Returns 1 when gh fails, answers with
-# something that is not a JSON array, or the login is unknown.
+# {number, title, url, comments}. Each ignored block gets a stderr line (not
+# with MAPPING_QUIET=1). Returns 1 when gh fails, answers with something that
+# is not a JSON array, or the login is unknown.
 gh_in_flight() {
-  local list login
+  local list login scan
   login="$(gh_login)" || return 1
   list="$(gh issue list -R "$1" --assignee @me --state open \
     --search "$MAPPING_MARKER in:comments" --json number,title,url,comments --limit 100)" || return 1
   # The search also hits comments that merely mention the marker, and anyone
   # can post a marker; keep only Issues with a trusted Mapping block.
-  printf '%s' "$list" | jq -ce --arg m "$MAPPING_MARKER" --arg login "$login" --arg repo "$1" \
+  scan="$(printf '%s' "$list" | jq -ce --arg m "$MAPPING_MARKER" --arg login "$login" --arg repo "$1" \
     --arg hub "$(mapping_hub)" "$MAPPING_JQ"'
-    if type == "array" then map(select(mapping_scan($m; $login; $repo; $hub).block != null))
-    else error("not an array") end' 2> /dev/null || return 1
+    if type == "array" then map({issue: ., scan: mapping_scan($m; $login; $repo; $hub)})
+      | {issues: map(select(.scan.block != null) | .issue),
+         rejects: map(.issue.number as $n | .scan.rejects[] | {issue: $n, why: .})}
+    else error("not an array") end' 2> /dev/null)" || return 1
+  [ "${MAPPING_QUIET:-0}" = 1 ] || mapping_warn "$1" "$(printf '%s' "$scan" | jq -c '.rejects')"
+  printf '%s' "$scan" | jq -c '.issues'
 }
 
 # gh_in_flight_count: gh_in_flight summed over every repo in hub.json. Prints
@@ -177,8 +200,9 @@ EOF_REPOS
 #
 # mapping_scan($m; $login; $repo; $hub) over an Issue object: {block, rejects}
 # where block is the last trusted block (null if none) and rejects lists why
-# every other block was ignored. $hub "" means no hub.json is in use: any
-# non-empty hub is accepted.
+# every other block was ignored. Repo names compare case-insensitively, as on
+# GitHub. $hub "" means no hub.json is loaded (every current script loads one):
+# any non-empty hub is accepted and mapping_latest logs it.
 # shellcheck disable=SC2016  # jq variables, not shell ones
 MAPPING_JQ='
 def mapping_scan($m; $login; $repo; $hub):
@@ -191,7 +215,8 @@ def mapping_scan($m; $login; $repo; $hub):
         "posted by \(if .a == "" then "an unknown author" else .a end), not the authenticated gh login \($login)"
       elif ($b | type) != "object" then "not a JSON object"
       elif $b.v != 1 then "version \($b.v | tojson), not 1"
-      elif $b.repo != $repo then "repo \($b.repo | tojson), not \($repo)"
+      elif ($b.repo | type) != "string" or ($b.repo | ascii_downcase) != ($repo | ascii_downcase) then
+        "repo \($b.repo | tojson), not \($repo)"
       elif $b.issue != $n then "issue \($b.issue | tojson), not \($n)"
       elif ($b.hub | type) != "string" or ($b.hub | length) == 0 then "no hub"
       elif $hub != "" and $b.hub != $hub then "hub \($b.hub | tojson), not \($hub)"
@@ -207,21 +232,20 @@ mapping_hub() {
 # mapping_latest <issue json with .number, .comments[]> <owner/repo>: the last
 # trusted Mapping block in comment order, as compact JSON; empty when there is
 # none. After a retry an Issue has several blocks; the latest is current. Each
-# ignored block gets a line on stderr. Returns 1 when the login is unknown.
+# ignored block gets a line on stderr (not with MAPPING_QUIET=1). Returns 1
+# when the login is unknown or the comments cannot be read.
 mapping_latest() {
-  local login hub scan why block
+  local login hub scan block n
   login="$(gh_login)" || { note "error: cannot read the authenticated gh login; trusting no Mapping block"; return 1; }
   hub="$(mapping_hub)"
   scan="$(printf '%s' "$1" | jq -c --arg m "$MAPPING_MARKER" --arg login "$login" --arg repo "$2" \
     --arg hub "$hub" "$MAPPING_JQ"'mapping_scan($m; $login; $repo; $hub)')" || return 1
-  while IFS= read -r why; do
-    [ -z "$why" ] || note "warning: $2#$(json_get "$1" '.number'): ignoring a Mapping block: $why"
-  done <<EOF_WHY
-$(json_get "$scan" '.rejects[]')
-EOF_WHY
+  n="$(json_get "$1" '.number')"
+  [ "${MAPPING_QUIET:-0}" = 1 ] ||
+    mapping_warn "$2" "$(printf '%s' "$scan" | jq -c --argjson n "${n:-0}" '[.rejects[] | {issue: $n, why: .}]')"
   block="$(json_get "$scan" '.block' -c)"
   [ -z "$block" ] || [ -n "$hub" ] ||
-    note "note: no hub.json in use; the Mapping block on $2#$(json_get "$1" '.number') names hub $(json_get "$block" '.hub')"
+    note "note: no hub.json in use; the Mapping block on $2#$n names hub $(json_get "$block" '.hub')"
   printf '%s' "$block"
 }
 
