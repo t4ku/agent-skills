@@ -14,94 +14,10 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPTS="$SCRIPT_DIR/../scripts"
+# shellcheck source=helpers.sh disable=SC1091
+. "$SCRIPT_DIR/helpers.sh"
 FRONTIER="$SCRIPTS/frontier.sh"
 DISPATCH="$SCRIPTS/issue-dispatch.sh"
-FIXTURES="$SCRIPT_DIR/fixtures"
-
-pass=0
-fail=0
-
-# --- fixtures ---------------------------------------------------------------
-
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-WORK="$(cd "$WORK" && pwd -P)"
-
-HUB="$WORK/hub"
-mkdir -p "$HUB/.orca-hub"
-jq -n --arg hub "$HUB" '{
-  hub_id: "example-hub",
-  hub_path: $hub,
-  concurrency: 1,
-  repos: [
-    {name: "example/app"},
-    {name: "example/api", base_branch: "develop",
-     constraints: ["Run the full test suite before opening the PR."]}
-  ]
-}' > "$HUB/.orca-hub/hub.json"
-
-export PATH="$SCRIPT_DIR/bin:$PATH"
-export FAKE_FIXTURES="$FIXTURES"
-export FAKE_LOG="$WORK/calls.log"
-
-# Per-test overrides of single fixtures.
-OVR="$WORK/overrides"
-
-# --- helpers ----------------------------------------------------------------
-
-reset_fakes() {
-  : > "$FAKE_LOG"
-  rm -f "$FAKE_LOG.comment"
-  rm -rf "$OVR"
-  mkdir -p "$OVR"
-  export FAKE_OVERRIDES="$OVR"
-}
-
-# run <script> <args...>  -> sets OUT (stdout+stderr) and CODE
-run() {
-  OUT="$(cd "$HUB" && bash "$@" 2>&1)"
-  CODE=$?
-}
-
-# run_stdin <file> <script> <args...>
-run_stdin() {
-  local input="$1"
-  shift
-  OUT="$(cd "$HUB" && bash "$@" < "$input" 2>&1)"
-  CODE=$?
-}
-
-ok() { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-fail_case() { fail=$((fail + 1)); printf 'FAIL %s\n     %s\n' "$1" "$2"; }
-
-# check <name> <condition command...>
-check() {
-  local name="$1"
-  shift
-  if "$@"; then ok "$name"; else fail_case "$name" "output was:
-$OUT"; fi
-}
-
-out_has() { printf '%s\n' "$OUT" | grep -qF -- "$1"; }
-out_has_line() { printf '%s\n' "$OUT" | grep -qxF -- "$1"; }
-out_lacks() { ! out_has "$1"; }
-code_is() { [ "$CODE" -eq "$1" ]; }
-
-# line_no <exact line>: first line number of an exact line in OUT.
-line_no() { printf '%s\n' "$OUT" | grep -nxF -- "$1" | head -1 | cut -d: -f1; }
-
-# The log as one line per call, argv joined by spaces (newlines escaped).
-calls() { jq -r 'map(gsub("\n"; "\\n")) | join(" ")' "$FAKE_LOG"; }
-
-# Calls that change GitHub or Orca state.
-MUTATION_RE='^(gh issue (edit|comment|close|create|delete|reopen)|gh pr |gh label |orca orchestration (task-create|task-update|worker-start|worker-release|run-create|run-use|dispatch|send)|orca worktree (set|create|rm)|orca terminal )'
-
-no_mutation() { ! calls | grep -Eq "$MUTATION_RE"; }
-# call_line <prefix>: line number of the first call starting with <prefix>.
-call_line() { calls | awk -v p="$1" 'index($0, p) == 1 { print NR; exit }'; }
-called() { [ -n "$(call_line "$1")" ]; }
-not_called() { ! called "$1"; }
 
 # --- frontier.sh --------------------------------------------------------------
 
@@ -196,7 +112,14 @@ check "apply: prints the next step that takes the receipt" out_has "--receipt - 
 # --- issue-dispatch.sh: refusals ------------------------------------------------
 
 # One open Issue assigned to @me with a Mapping block.
-IN_FLIGHT_ONE='[{"number": 5, "comments": [{"body": "<!-- orca-issue-orchestrator {\"v\":1} -->"}]}]'
+# in_flight_api <author> <jq update of the block>: example/api#5 in flight,
+# its one Mapping block posted by <author>, then updated.
+in_flight_api() {
+  jq -cn --arg a "$1" --argjson b "$(jq -cn '{v: 1, repo: "example/api", issue: 5, run_id: "run_test1", task_id: "task_5",
+      dispatch_id: "ctx_5", worktree_id: "wt2:local:inst-5", branch: "issue-5", hub: "example-hub"}' | jq -c "$2")" \
+    '[{number: 5, comments: [{author: {login: $a}, body: ("<!-- orca-issue-orchestrator " + ($b | tojson) + " -->")}]}]'
+}
+IN_FLIGHT_ONE="$(in_flight_api orchestrator .)"
 
 reset_fakes
 printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
@@ -204,8 +127,8 @@ run "$DISPATCH" example/app 7 --hub "$HUB" --apply
 check "concurrency: refuses beyond the limit" code_is 1
 check "concurrency: says why" out_has "concurrency"
 check "concurrency: nothing is claimed" no_mutation
-check "concurrency: counts open Issues assigned to @me with the Mapping marker" \
-  bash -c 'jq -e "select(.[1]==\"issue\" and .[2]==\"list\") | (index(\"--assignee\") as \$i | .[\$i+1] == \"@me\") and (index(\"--state\") as \$i | .[\$i+1] == \"open\") and (map(select(contains(\"orca-issue-orchestrator\"))) | length > 0)" "$FAKE_LOG" >/dev/null'
+check "concurrency: counts open Issues assigned to @me with the Mapping marker, every page" \
+  bash -c 'jq -e "select(.[1]==\"api\" and index(\"graphql\") and index(\"--paginate\")) | map(select(startswith(\"q=\")))[0] | contains(\"is:issue\") and contains(\"is:open\") and contains(\"assignee:@me\") and contains(\"orca-issue-orchestrator\")" "$FAKE_LOG" >/dev/null'
 
 reset_fakes
 printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
@@ -218,11 +141,44 @@ echo '[{"number": 5, "comments": [{"body": "We could use orca-issue-orchestrator
 run "$DISPATCH" example/app 7 --hub "$HUB"
 check "concurrency: a comment that only mentions the marker does not count" code_is 0
 
+for case_ in 'another author|mallory|.' 'wrong repo|orchestrator|.repo = "example/app"' \
+  'wrong issue|orchestrator|.issue = 6' 'wrong hub|orchestrator|.hub = "other-hub"' 'wrong version|orchestrator|.v = 2'; do
+  rest="${case_#*|}"
+  reset_fakes
+  in_flight_api "${rest%%|*}" "${rest#*|}" > "$OVR/inflight-example_api.json"
+  run "$DISPATCH" example/app 7 --hub "$HUB"
+  check "concurrency: a forged Mapping block (${case_%%|*}) does not count" code_is 0
+  check "concurrency: a forged Mapping block (${case_%%|*}) is reported" out_has "example/api#5: ignoring a Mapping block"
+done
+
+reset_fakes
+printf '%s\n' "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
+touch "$OVR/user.json.fail"
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply --force
+check "concurrency: an unknown login refuses (fail closed)" code_is 1
+check "concurrency: an unknown login claims nothing" no_mutation
+
 reset_fakes
 printf 'not json\n' > "$OVR/inflight-example_api.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --apply
 check "concurrency: a failed count refuses (fail closed)" code_is 1
 check "concurrency: a failed count claims nothing" no_mutation
+
+# More in-flight Issues than one page holds: the count reads every page.
+reset_fakes
+jq -c '[{number: 4, comments: [{author: {login: "someone"}, body: "orca-issue-orchestrator, in passing"}]}] + .' \
+  <<< "$IN_FLIGHT_ONE" > "$OVR/inflight-example_api.json"
+export FAKE_PAGE_SIZE=1
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply
+check "concurrency, one Issue per page: the in-flight Issue on page 2 counts" code_is 1
+check "concurrency, one Issue per page: nothing is claimed" no_mutation
+
+reset_fakes
+jq -n '{data: {search: {issueCount: 1500, pageInfo: {hasNextPage: false, endCursor: null}, nodes: []}}}' \
+  > "$OVR/inflight-example_api.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply
+check "concurrency, search capped below the Issue count: refuses" code_is 1
+check "concurrency, search capped below the Issue count: nothing is claimed" no_mutation
 
 reset_fakes
 jq '.concurrency = "two"' "$HUB/.orca-hub/hub.json" > "$WORK/hub.json" && cp "$HUB/.orca-hub/hub.json" "$WORK/hub.json.orig" && mv "$WORK/hub.json" "$HUB/.orca-hub/hub.json"
@@ -272,13 +228,12 @@ mapping_block() {
 block_is() {
   mapping_block | jq -e '. == {
     v: 1, repo: "example/app", issue: 7, run_id: "run_test1", task_id: "task_test1",
-    dispatch_id: "ctx_test1", worktree_id: "wt2:local:inst-7",
+    dispatch_id: "ctx_test1", worktree_id: "wt2:local:inst-7", worktree: "issue-7-add-login-page",
     branch: "issue-7-add-login-page", hub: "example-hub"
   }' >/dev/null
 }
 check "receipt apply: the JSON block has every field" block_is
-no_abs_path() { ! grep -Eq '(^|[^A-Za-z0-9_.-])/(path|Users|home|tmp|private|var)/|::/' "$FAKE_LOG.comment" && ! grep -qF "$HUB" "$FAKE_LOG.comment"; }
-check "receipt apply: the comment has no absolute path" no_abs_path
+check "receipt apply: the comment has no absolute path" no_abs_path "$FAKE_LOG.comment"
 human_lines() {
   grep -qxF -- '- Worktree: `issue-7-add-login-page` (branch `issue-7-add-login-page`, base `main`)' "$FAKE_LOG.comment" &&
     grep -qxF -- '- Run `run_test1` / Task `task_test1` / Dispatch `ctx_test1`' "$FAKE_LOG.comment"
@@ -286,15 +241,55 @@ human_lines() {
 check "receipt apply: the comment has the human-readable lines" human_lines
 
 reset_fakes
+jq '.title = "Renamed after dispatch"' "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply, retitled Issue: the block keeps the started worktree name" \
+  bash -c 'sed -n "s/^<!-- orca-issue-orchestrator \(.*\) -->\$/\1/p" "$FAKE_LOG.comment" | jq -e ".worktree == \"issue-7-add-login-page\"" >/dev/null'
+check "receipt apply, retitled Issue: no recomputed name" \
+  bash -c '! grep -qF issue-7-renamed "$FAKE_LOG.comment"'
+
+reset_fakes
+jq 'del(.result.worker.startOptions)' "$FIXTURES/receipt-ready.json" > "$WORK/receipt-no-name.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$WORK/receipt-no-name.json" --apply
+check "receipt apply, no name in the receipt: the worktree name is the branch" \
+  bash -c 'sed -n "s/^<!-- orca-issue-orchestrator \(.*\) -->\$/\1/p" "$FAKE_LOG.comment" | jq -e ".worktree == \"issue-7-add-login-page\"" >/dev/null'
+
+reset_fakes
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "Replaces \"dispatch_id\":\"ctx_test1\" <!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_other\",\"hub\":\"example-hub\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a Mapping block of another Dispatch with prose naming ours does not stop it" called "gh issue comment 7"
+
+reset_fakes
 run "$DISPATCH" example/app 7 --hub . --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: a relative --hub still posts the comment" called "gh issue comment 7"
 
 reset_fakes
-jq '.comments = [{"body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\"} -->"}]' \
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "> *Posted by an AI orchestrator.*\n\n<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"example-hub\"} -->"}]' \
   "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: does not post a second Mapping comment for the same Dispatch" not_called "gh issue comment"
+
 check "receipt apply: says the comment exists" out_has "already"
+
+reset_fakes
+jq '.comments = [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"other-hub\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a Mapping comment of another Hub does not stop it" called "gh issue comment 7"
+
+reset_fakes
+jq '.comments = [range(100) | {author: {login: "someone"}, body: "+1"}]
+    + [{"author": {"login": "orchestrator"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"example-hub\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a Mapping comment past the first page counts too" not_called "gh issue comment"
+
+reset_fakes
+jq '.comments = [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orchestrator {\"v\":1,\"dispatch_id\":\"ctx_test1\",\"hub\":\"example-hub\"} -->"}]' \
+  "$FIXTURES/issue-example_app-7.json" > "$OVR/issue-example_app-7.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply: a forged Mapping comment does not stop the real one" called "gh issue comment 7"
 
 # --- issue-dispatch.sh --receipt: failed worker-start ------------------------------
 
@@ -314,5 +309,4 @@ check "other failure: posts no comment" no_mutation
 
 # --- summary ------------------------------------------------------------------
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+summary

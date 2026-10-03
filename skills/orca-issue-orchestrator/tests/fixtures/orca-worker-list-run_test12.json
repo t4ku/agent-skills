@@ -1,0 +1,67 @@
+{
+  "ok": true,
+  "result": {
+    "scope": {
+      "run": "run_test12",
+      "source": "flag"
+    },
+    "page": {
+      "limit": 100,
+      "total": 2,
+      "hasMore": false,
+      "nextCursor": null
+    },
+    "counts": {
+      "retained": 1,
+      "released": 1
+    },
+    "workers": [
+      {
+        "dispatchId": "ctx_test12",
+        "taskId": "task_test12",
+        "runId": "run_test12",
+        "workerState": "succeeded",
+        "dispatchStatus": "completed",
+        "terminalState": "retained",
+        "resource": {
+          "ownershipState": "external",
+          "releaseState": "not_requested",
+          "retainedReason": "external_terminal"
+        },
+        "projection": {
+          "outcome": "succeeded",
+          "liveness": {
+            "verdict": "unverifiable"
+          },
+          "nextAction": {
+            "kind": "none",
+            "argv": []
+          }
+        }
+      },
+      {
+        "dispatchId": "ctx_old12",
+        "taskId": "task_test12",
+        "runId": "run_test12",
+        "workerState": "failed",
+        "dispatchStatus": "failed",
+        "terminalState": "released",
+        "resource": {
+          "ownershipState": "released",
+          "releaseState": "released",
+          "retainedReason": null
+        },
+        "projection": {
+          "outcome": "failed",
+          "liveness": {
+            "verdict": "exited"
+          },
+          "nextAction": {
+            "kind": "none",
+            "argv": []
+          }
+        }
+      }
+    ]
+  }
+}

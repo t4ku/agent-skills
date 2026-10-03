@@ -1,0 +1,15 @@
+{
+  "number": 41,
+  "url": "https://github.com/example/app/pull/41",
+  "state": "MERGED",
+  "headRefName": "issue-12-add-password-reset",
+  "headRepository": {
+    "name": "app"
+  },
+  "headRepositoryOwner": {
+    "login": "example"
+  },
+  "isCrossRepository": false,
+  "baseRefName": "main",
+  "body": "Closes #13\n\nAudit log export."
+}

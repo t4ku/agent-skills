@@ -55,13 +55,15 @@ printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || die "repo 
 printf '%s' "$number" | grep -Eq '^[1-9][0-9]*$' || die "Issue number must be a positive integer: $number"
 
 hub_load "$hub_arg"
+# Only the authenticated orchestrator's marker comments are trusted.
+gh_login_load
 repo_cfg="$(hub_repo "$repo")"
 [ -n "$repo_cfg" ] || die "$repo is not in $HUB_JSON repos[]; add it there first"
 
 if [ "$APPLY" -eq 1 ]; then mode="apply"; else mode="dry-run; add --apply to act"; fi
 
-issue="$(gh issue view "$number" -R "$repo" --json number,title,body,state,assignees,url,comments)" ||
-  die "cannot read $repo#$number"
+issue="$(gh_issue_view "$repo" "$number" number,title,body,state,assignees,url)" ||
+  die "cannot read $repo#$number and all its comments"
 title="$(json_get "$issue" '.title')"
 name="$(worktree_name "$number" "$title")"
 
@@ -74,16 +76,16 @@ fi
 
 # --- Step 2: the worker-start receipt -> Mapping comment ------------------------
 
-# mapping_comment <run> <task> <dispatch> <worktree identity> <branch>
+# mapping_comment <run> <task> <dispatch> <worktree identity> <branch> <worktree name>
 mapping_comment() {
   local block
   block="$(jq -cn --arg repo "$repo" --argjson issue "$number" --arg run "$1" --arg task "$2" \
-    --arg dispatch "$3" --arg wt "$4" --arg branch "$5" --arg hub "$(hub_id)" \
+    --arg dispatch "$3" --arg wt "$4" --arg branch "$5" --arg wt_name "$6" --arg hub "$(hub_id)" \
     '{v: 1, repo: $repo, issue: $issue, run_id: $run, task_id: $task, dispatch_id: $dispatch,
-      worktree_id: $wt, branch: $branch, hub: $hub}')"
+      worktree_id: $wt, worktree: $wt_name, branch: $branch, hub: $hub}')"
   printf '%s\n\n' "$DISCLAIMER"
   printf 'Dispatched to an Orca worker.\n'
-  printf -- '- Worktree: `%s` (branch `%s`, base `%s`)\n' "$name" "$5" "$base"
+  printf -- '- Worktree: `%s` (branch `%s`, base `%s`)\n' "$6" "$5" "$base"
   printf -- '- Run `%s` / Task `%s` / Dispatch `%s`\n\n' "$1" "$2" "$3"
   printf '<!-- %s %s -->\n' "$MAPPING_MARKER" "$block"
 }
@@ -132,20 +134,23 @@ if [ -n "$receipt" ]; then
   worktree_key="$(json_get "$worktree" '.identity.key')"
   branch="$(json_get "$worktree" '.branch | sub("^refs/heads/"; "")')"
   [ -n "$worktree_key" ] && [ -n "$branch" ] || die "worktree $worktree_id has no identity key or branch"
+  # The name worker-start gave the worktree, kept in the block so closeout
+  # never recomputes it from a title that may change. Orca derives the branch
+  # from that name, so the branch stands in when the receipt lacks it.
+  wt_name="$(r_first '.startOptions?.name?')"
+  [ -n "$wt_name" ] || wt_name="$branch"
 
-  body="$(mapping_comment "$run_id" "$task_id" "$dispatch_id" "$worktree_key" "$branch")"
-  hub_path="$(hub_get '.hub_path // empty')"
-  case "$body" in
-    *::/* | *"$HUB_DIR"* | *"${hub_path:-$HUB_DIR}"* | *"${HOME:-$HUB_DIR}"*)
-      die "refusing to post: the Mapping comment would contain a local path" ;;
-  esac
+  body="$(mapping_comment "$run_id" "$task_id" "$dispatch_id" "$worktree_key" "$branch" "$wt_name")"
+  if frag="$(local_path_fragment "$body")"; then
+    die "refusing to post: the Mapping comment would contain the local path $frag"
+  fi
 
   printf 'Mapping for %s#%s (%s):\n\n' "$repo" "$number" "$mode"
   printf '# Link the worktree to the Issue in Orca (run it yourself; this script never does)\n'
   print_cmd orca worktree set --worktree "id:$worktree_id" --issue "$number" --json
   printf '\n# Post the Mapping comment\n'
 
-  if json_get "$issue" '.comments[]?.body' | grep -F "$MAPPING_MARKER" | grep -qF "\"dispatch_id\":\"$dispatch_id\""; then
+  if has_marker_comment "$issue" "$MAPPING_MARKER" dispatch_id "$dispatch_id"; then
     printf 'A Mapping comment for Dispatch %s is already on the Issue; not posting again.\n' "$dispatch_id"
     exit 0
   fi
@@ -164,7 +169,7 @@ assignees="$(json_get "$issue" '[.assignees[]?.login] | join(", ") | select(leng
 
 limit="$(hub_concurrency)"
 case "$limit" in '' | *[!0-9]*) die "concurrency in hub.json must be a non-negative integer: $limit" ;; esac
-in_flight="$(gh_in_flight_count)" || die "cannot count in-flight Issues (gh issue list failed); nothing was done"
+in_flight="$(gh_in_flight_count)" || die "cannot count every in-flight Issue (the gh search failed or was truncated); nothing was done"
 if [ "$in_flight" -ge "$limit" ]; then
   if [ "$force" -eq 1 ]; then
     note "warning: $in_flight Issue(s) in flight, concurrency $limit; dispatching anyway (--force)"
@@ -237,6 +242,6 @@ printf '\n# 5. Post the Mapping comment (from the receipt of step 3)\n'
 print_cmd gh issue comment "$number" -R "$repo" --body-file -
 printf '   Pipe the worker-start JSON into:\n   '
 print_cmd "$SCRIPT_DIR/$(basename "$0")" "$repo" "$number" --receipt - --apply
-printf '\n%s\n' "$(mapping_comment "${run_id:-<run_id>}" "$task_id" "<dispatch_id>" "<worktree_id>" "<branch>")"
+printf '\n%s\n' "$(mapping_comment "${run_id:-<run_id>}" "$task_id" "<dispatch_id>" "<worktree_id>" "<branch>" "$name")"
 
 printf '\n--- Spec ---\n%s\n--- end of Spec ---\n' "$spec"

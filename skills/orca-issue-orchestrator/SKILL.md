@@ -48,7 +48,9 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 | `scripts/init-hub` | Write the Guard, Orchestrator instructions, and `.orca-hub/hub.json` into an existing Hub folder |
 | `scripts/frontier.sh` | List open, unblocked, unassigned `ready-for-agent` Issues across the configured repos (read-only) |
 | `scripts/issue-dispatch.sh` | Claim an Issue and create the Task; print the `worker-start` and `worktree set` to run; from the `worker-start` receipt, post the Mapping comment |
-| `scripts/issue-closeout` | Post the success or failure comment, adjust assignee / labels on failure, release the Worker |
+| `scripts/issue-closeout.sh` | From the `worker_done`, post the success or failure comment; on failure add `needs-info` and unassign; print `worker-release` |
+| `scripts/issue-audit.sh` | List in-flight Issues whose PR is merged but which are still open; `--apply` comments a close-it-by-hand notice |
+| `scripts/issue-recover.sh` | After an Orca restart: read the latest Mapping block per in-flight Issue, reconcile with Orca, print (`--apply`: run) `run-use` |
 | `scripts/guard.sh` | The PreToolUse hook; `init-hub` copies it into `.orca-hub/`. Hook-contract tests: `tests/guard.test.sh` |
 
 ## Initialise a Hub folder
@@ -63,15 +65,18 @@ Nothing under `~/.claude`, `~/.codex`, or `~/.orca` is touched.
 
 ## Typical requests
 
-- **"take #123"** — run `issue-dispatch` for that Issue (preview, then `--apply`), then supervise.
-- **"take the next one"** — run `frontier`, pick the first Issue, then as above. Only when a human asks.
-- **After an Orca restart** — follow the recovery steps in Issue sync: find the Mapping comments on Issues assigned to you, re-bind the Run, reconcile with Orca's worker and worktree lists.
+- **"take #123"** — dispatch in two steps, then supervise:
+  1. `issue-dispatch.sh <owner>/<repo> 123` (preview), then `--apply`: claims the Issue, creates the Task, and prints `worker-start`.
+  2. Run that `worker-start` and pipe its receipt into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`: it posts the Mapping comment, or prints the retry command when `worker-start` failed.
+- **"take the next one"** — run `frontier.sh`, pick the first Issue, then as above. Only when a human asks.
+- **A `worker_done` arrived** — pipe `orca orchestration check --json` into `issue-closeout.sh <owner>/<repo> 123 <succeeded|failed> -` (on failure add `--needs`), preview then `--apply`; then run the printed `worker-release`. After PRs merge, run `issue-audit.sh` and close leftover Issues by hand.
+- **After an Orca restart** — `issue-recover.sh` (preview), then `--apply` to re-bind the Run; act on each Issue's reported state.
 
 ## Rules that do not bend
 
 - Claim (assign `@me`) before any other action on an Issue.
 - Every comment you post starts with `> *Posted by an AI orchestrator.*`
-- Never close an Issue, merge a PR, or push. Success is an open PR whose body starts with `Closes #123`; GitHub closes the Issue on merge.
+- Never close an Issue, merge a PR, or push. Success is an open PR whose body starts with `Closes #123`. GitHub does not always close the Issue on merge; `issue-audit.sh` lists the ones left open for a human to close.
 - Never run `task-update --status completed`; a valid `worker_done` settles the Task.
 - No automatic retry after a failure.
 - Public comments carry the `hub_id`, never a local path.
