@@ -93,13 +93,7 @@ while IFS= read -r run; do
 done <<EOF_RUNS
 $(printf '%s' "$runs" | jq -r '.[]')
 EOF_RUNS
-wt_list="$(orca worktree list --json)" || die "orca worktree list failed; nothing was done"
-# An error or malformed envelope must not pass for "no worktrees" (every one missing).
-worktrees="$(printf '%s' "$wt_list" | jq -c 'select(.ok == true and (.result.worktrees | type) == "array")
-  | .result.worktrees' 2> /dev/null)" && [ -n "$worktrees" ] || {
-  printf '%s\n' "$wt_list" >&2
-  die "orca worktree list answered no {ok: true} list of worktrees (above); nothing was done"
-}
+worktrees="$(orca_worktrees)" || die "cannot read orca worktree list; nothing was done"
 
 closeout="$SCRIPT_DIR/issue-closeout.sh"
 audit="$SCRIPT_DIR/issue-audit.sh"
@@ -130,7 +124,7 @@ rows="$(jq -cn --argjson rows "$rows" --argjson workers "$workers" --argjson wts
         next: (if $state == "closed-out" then [$audit]
           elif $state == "succeeded" then [$closeout, $r.repo, ($r.issue | tostring), "succeeded", "<summary_file>"]
           elif $state == "failed" then [$closeout, $r.repo, ($r.issue | tostring), "failed", "<summary_file>", "--needs", "<text>"]
-          elif $state == "working" then ["orca", "orchestration", "check", "--wait", "--types", "worker_done,escalation,question", "--json"]
+          elif $state == "working" then ["orca", "orchestration", "check", "--wait", "--types", "worker_done,escalation,question", "--timeout-ms", "570000", "--json"]
           else ["orca", "orchestration", "worker-show", "--dispatch", $r.dispatch_id, "--json"] end)
       })')"
 

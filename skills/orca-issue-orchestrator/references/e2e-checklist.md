@@ -5,7 +5,7 @@ The steps only a human can do, in order, to verify the skill on a real machine: 
 How to use it:
 
 - Work on a copy of this file outside the repo, or in the Hub folder's `docs/`. Tick each box and fill each **Record** line.
-- Replace the placeholders: `<hub-dir>` (the Hub folder, an absolute path), `<owner>/<repo>` (a repo of the project, with an Orca repo for it), `123` (a small `ready-for-agent` Issue you are happy to have implemented), `<project-id>`, `<skill-dir>` (where the skill is installed, e.g. a checkout's `skills/orca-issue-orchestrator`).
+- Replace the placeholders: `<hub-dir>` (the Hub folder, an absolute path), `<owner>/<repo>` (a repo of the project, with an Orca repo for it), `123` (a small `ready-for-agent` Issue you are happy to have implemented), `<hub_id>` (the short Hub id that public comments carry, no path), `<project-id>`, `<skill-dir>` (where the skill is installed, e.g. a checkout's `skills/orca-issue-orchestrator`).
 - When a step does not give the observable result it names, stop, record what you saw, and file a new Issue for the deviation. Do not fix it in the same run.
 - At the end, copy the versions and the outcome of each part into the "Verified environment" table of [SKILL.md](../SKILL.md) through a PR, and link the deviation Issues there.
 
@@ -41,14 +41,14 @@ How to use it:
 - [ ] Preview:
 
   ```sh
-  <skill-dir>/scripts/init-hub.sh <hub-dir> --hub-id <hub-id> --repo <owner>/<repo>
+  <skill-dir>/scripts/init-hub.sh <hub-dir> --hub-id <hub_id> --repo <owner>/<repo>
   ```
 
-  **Proves it:** a plan ending in `Dry-run: nothing written.` that lists `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.claude/agents/orchestrator.md`, `.codex/config.toml`, `.codex/rules/orchestrator.rules`, `.orca-hub/hub.json`, `.orca-hub/guard.sh`, and `docs/`, `research/`, `tmp/`; nothing in `<hub-dir>` changed.
+  **Proves it:** a plan with the line `Dry-run: nothing written. Re-run with --apply to write <n> change(s).` that lists `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.claude/agents/orchestrator.md`, `.codex/config.toml`, `.codex/rules/orchestrator.rules`, `.orca-hub/hub.json`, `.orca-hub/guard.sh`, and `docs/`, `research/`, `tmp/`; nothing in `<hub-dir>` changed.
 
 - [ ] Apply: the same command with `--apply`, then run it once more with `--apply`.
 
-  **Proves it:** the first run ends `Wrote <n> change(s).`; the second ends `No changes.` Nothing under `~/.claude`, `~/.codex`, or `~/.orca` changed (compare their modification times before and after).
+  **Proves it:** the first run prints `Wrote <n> change(s).`; the second prints `No changes.` (both followed by the hub.json and Codex next steps) Nothing under `~/.claude`, `~/.codex`, or `~/.orca` changed (compare their modification times before and after).
 
   **Record:** changes written ____ / second run ____ / Codex launch command printed (yes/no, dot variant or not) ____
 
@@ -56,7 +56,7 @@ How to use it:
 
 - [ ] Edit `<hub-dir>/.orca-hub/hub.json`: `hub_id` (short, no path), `repos[]` (`{"name": "<owner>/<repo>"}`, optional `base_branch`, `constraints[]`), `concurrency` (keep `1` for this run). Schema: [hub-json.md](hub-json.md). If you changed `bash_allow[]`, re-run step 2 with `--apply`.
 
-  **Proves it:** `<skill-dir>/scripts/frontier.sh --hub <hub-dir>` lists Issue 123 among the Frontier lines `<owner>/<repo>#123  <title>  <url>`.
+  **Proves it:** `<skill-dir>/scripts/frontier.sh --hub <hub-dir>` lists Issue 123 among the Frontier lines (tab-separated `<owner>/<repo>#123`, title, URL).
 
   **Record:** hub_id ____ / repos ____ / concurrency ____
 
@@ -76,7 +76,7 @@ How to use it:
 
 Ask the Orchestrator session to do each of these and watch the result.
 
-- [ ] Create `<hub-dir>/notes.md` (the hub root, outside the four directories).
+- [ ] Create `<hub-dir>/notes.md` (the Hub folder root, outside the four directories).
 
   **Proves it:** denied with exactly `Editing code is forbidden in the orchestrator. Create a Task with orca orchestration and delegate it (see /orca-issue-orchestrator).`; the file does not exist.
 
@@ -112,7 +112,7 @@ Ask the Orchestrator to "take #123" and let it follow "The loop" in [issue-sync.
 
 - [ ] **Worker started, Mapping comment posted** (the printed `worker-start` piped into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`, then the printed `orca worktree set`).
 
-  **Proves it:** a new worktree `issue-123-<slug>` appears in Orca, linked to Issue 123 in the sidebar; the Issue has one comment that starts with `> *Posted by an AI orchestrator.*`, names the worktree, branch, Run, Task, and Dispatch, ends with an `<!-- orca-issue-orchestrator {...} -->` block carrying `"hub":"<hub-id>"`, and contains no local path.
+  **Proves it:** a new worktree `issue-123-<slug>` appears in Orca, linked to Issue 123 in the sidebar; the Issue has one comment that starts with `> *Posted by an AI orchestrator.*`, names the worktree, branch, Run, Task, and Dispatch, ends with an `<!-- orca-issue-orchestrator {...} -->` block carrying `"hub":"<hub_id>"`, and contains no local path.
 
   **Record:** worktree ____ / did `worker-start` fail at `agent_readiness`, and did the printed retry work? ____
 
