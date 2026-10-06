@@ -6,27 +6,27 @@ Every write goes through an Orchestrator command. Each one prints what it would 
 
 ## The loop
 
-The whole procedure, one Issue at a time. Each step names its script; the sections below hold the detail. For the Orca verbs themselves (`run-create`, `worker-start`, `check`, `reply`, `worker-release`, the delivery id to `--ack`) read `orca skills get orchestration --full` at the start of the session; this file does not copy it. Run every script from the Hub folder (or pass `--hub <hub-dir>`).
+The whole procedure, one Issue at a time. Each step names its script; the sections below hold the detail. For the Orca verbs themselves (`run-create`, `worker-start`, `check`, `reply`, `worker-release`, the delivery id to `--ack`) read `orca skills get orchestration --full` at the start of the session; this file does not copy it. `<skill-dir>` is the directory this skill is installed in (the one holding `SKILL.md`, as the skill loader shows it, e.g. a checkout's `skills/orca-issue-orchestrator`); the Hub folder has no `scripts/` of its own, so call every script by its full `<skill-dir>/scripts/...` path. Run them from the Hub folder (or pass `--hub <hub-dir>`).
 
 0. **Bind a Run** once per session. Step 1 of dispatch refuses without one and prints the `orca orchestration run-create` to run.
 1. **Choose the Issue.** The human names it ("take #123"), or, only when the human asks ("take the next one"), take the first line of the [Frontier](#frontier):
 
    ```sh
-   scripts/frontier.sh
+   <skill-dir>/scripts/frontier.sh
    ```
 
 2. **Claim and create the Task** ([step 1](#step-1-claim-and-create-the-task)): preview, then apply. It prints the `worker-start` and the `worktree set` to run; it runs neither.
 
    ```sh
-   scripts/issue-dispatch.sh <owner>/<repo> 123
-   scripts/issue-dispatch.sh <owner>/<repo> 123 --apply
+   <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123
+   <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123 --apply
    ```
 
 3. **Start the Worker and post the Mapping comment** ([step 2](#step-2-start-the-worker-link-the-worktree-post-the-mapping-comment)): run the printed `worker-start` and pipe its receipt into step 2, then run the `orca worktree set` it prints.
 
    ```sh
    orca orchestration worker-start --task <task_id> ... --json \
-     | scripts/issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply
+     | <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply
    ```
 
    On exit 3 with `agent_readiness`, check the agent with `orca orchestration worker-show --dispatch <dispatch_id> --json`, run the printed retry `worker-start`, and pipe that receipt into step 2 again. Any other failed stage: do not relaunch (see step 2).
@@ -36,32 +36,32 @@ The whole procedure, one Issue at a time. Each step names its script; the sectio
    orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 570000 --json
    ```
 
-   Heartbeats arrive in the same batch; ignore them. An empty or timed-out wait is a checkpoint, not a failure: run the same wait again. Never stop, retry, or release a Worker because nothing arrived.
-5. **Answer a Worker `ask`** (a `question` message). Answer from the Issue (body and comments) and repo facts with `orca orchestration reply --id <message_id> --body "<answer>" --json`. If they do not answer it, ask the human in this session and relay their answer the same way. Never answer by guessing, and never create a gate for it. An `escalation` is handled the same way. Then `--ack` the batch and wait again (step 4).
+   Heartbeats arrive in the same batch; ignore them. An empty or timed-out wait is a checkpoint, not a failure: run the same wait again. Never stop, retry, or release a Worker because nothing arrived. A non-empty batch is one delivery: handle every message in it with steps 5 to 7, then acknowledge it once in step 8. Do not acknowledge anything before then.
+5. **Answer a Worker `ask`** (a `question` message). Answer from the Issue (body and comments) and repo facts with `orca orchestration reply --id <message_id> --body "<answer>" --json`. If they do not answer it, ask the human in this session and relay their answer the same way. Never answer by guessing, and never create a gate for it. An `escalation` is handled the same way. Do not acknowledge yet: if the same batch also holds a `worker_done`, continue with step 6; otherwise go to step 8.
 6. **Close out** when a `worker_done` for this Issue's Dispatch is in the batch ([Closeout](#closeout)). `check` replays the batch until you acknowledge it, so feed the same batch to the preview and the apply:
 
    ```sh
-   orca orchestration check --json | scripts/issue-closeout.sh <owner>/<repo> 123 succeeded -
-   orca orchestration check --json | scripts/issue-closeout.sh <owner>/<repo> 123 succeeded - --apply
-   orca orchestration check --json | scripts/issue-closeout.sh <owner>/<repo> 123 failed - \
+   orca orchestration check --json | <skill-dir>/scripts/issue-closeout.sh <owner>/<repo> 123 succeeded -
+   orca orchestration check --json | <skill-dir>/scripts/issue-closeout.sh <owner>/<repo> 123 succeeded - --apply
+   orca orchestration check --json | <skill-dir>/scripts/issue-closeout.sh <owner>/<repo> 123 failed - \
      --needs "<what a human must supply>" --apply
    ```
 
-   Use the outcome the `worker_done` reports; the script refuses a mismatch.
+   Use the outcome the `worker_done` reports; the script refuses a mismatch. With more than one `worker_done` in the batch, run steps 6 and 7 for each one, with that Issue's number.
 7. **Release the Worker**: run the `orca orchestration worker-release --dispatch <dispatch_id> --json` that closeout printed. The worktree is kept.
-8. **Acknowledge** the delivery: `orca orchestration check --ack <delivery_id> --json` (or `--ack <delivery_id> --wait ...` to go straight back to step 4 for another in-flight Issue). Acknowledge only after every message in the batch is handled.
+8. **Acknowledge** the delivery, exactly once, as the last action on the batch: only after every `question` and `escalation` in it is replied to and every `worker_done` in it is closed out (step 6) with its Worker released (step 7). Run `orca orchestration check --ack <delivery_id> --json`, or `--ack <delivery_id> --wait ...` to go straight back to step 4 while another Issue is in flight. Orca never replays an acknowledged delivery, so a message left unhandled at this point is lost: its Issue keeps no closeout and its terminal is never released.
 9. **Audit after merges.** A human reviews and merges the PR. Then list in-flight Issues whose PR merged but which are still open, and let the human close them ([Merged PR, Issue still open](#merged-pr-issue-still-open)):
 
    ```sh
-   scripts/issue-audit.sh
-   scripts/issue-audit.sh --apply
+   <skill-dir>/scripts/issue-audit.sh
+   <skill-dir>/scripts/issue-audit.sh --apply
    ```
 
 10. **Recover after an Orca restart** (or a new Orchestrator session) before anything else ([Recovery](#recovery-after-an-orca-restart)): preview, then re-bind the Run, then act on each Issue's state (wait, close out, or inspect).
 
     ```sh
-    scripts/issue-recover.sh
-    scripts/issue-recover.sh --apply
+    <skill-dir>/scripts/issue-recover.sh
+    <skill-dir>/scripts/issue-recover.sh --apply
     ```
 
 Then back to step 1. With `concurrency` above 1, run steps 1 to 3 for each Issue first (finish step 3 before the next step 1), then wait for all of them in one loop; match each `worker_done` to its Issue by the `dispatchId` in its Mapping block.
