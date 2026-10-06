@@ -407,9 +407,22 @@ orca_bound_run() {
   orca orchestration run-current --json | jq -r '.result.run.id // empty'
 }
 
-# orca_worktree <worktree-id>: the worktree list row as compact JSON, empty if absent.
+# orca_worktree <worktree-id>: the worktree list row as compact JSON, empty if
+# absent. Returns 1, with the reason and the raw answer on stderr, when
+# `orca worktree list` fails or answers anything but {ok: true} with a
+# result.worktrees array: an error envelope must not pass for "not listed".
 orca_worktree() {
-  orca worktree list --json | jq -c --arg id "$1" 'first(.result.worktrees[]? | select(.id == $id)) // empty'
+  local list
+  list="$(orca worktree list --json)" || {
+    note "orca worktree list failed"
+    return 1
+  }
+  printf '%s' "$list" | jq -e 'select(.ok == true and (.result.worktrees | type) == "array")' > /dev/null 2>&1 || {
+    printf '%s\n' "$list" >&2
+    note "orca worktree list answered no {ok: true} list of worktrees (above)"
+    return 1
+  }
+  printf '%s' "$list" | jq -c --arg id "$1" 'first(.result.worktrees[] | select(.id == $id)) // empty'
 }
 
 # orca_workers <run-id>: every worker-list row of the Run as one JSON array,

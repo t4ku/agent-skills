@@ -35,7 +35,8 @@ Two procedures carry the detail. Read the one you need before acting.
 | Procedure | Reference | What it covers |
 |-----------|-----------|----------------|
 | **Guard** | `references/guard.md` | What the hook allows and denies in the Hub folder, the `permissions.deny` safety net, the Codex read-only sandbox, and how to read a denial |
-| **Issue sync** | `references/issue-sync.md` | Claim, Frontier, Spec template, dispatch, Mapping comment, success / failure closeout, recovery after an Orca restart |
+| **Issue sync** | `references/issue-sync.md` | **The loop** (start here: the script for every step), then Claim, Frontier, Spec template, dispatch, Mapping comment, success / failure closeout, audit, recovery after an Orca restart |
+| **End-to-end check** | `references/e2e-checklist.md` | The steps only a human can do to verify a real Hub folder, with what each must show and where to record it |
 
 The Hub folder config `.orca-hub/hub.json` and exactly what `scripts/guard.sh` allows and denies: `references/hub-json.md`.
 
@@ -47,7 +48,7 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 |--------|---------|
 | `scripts/init-hub` | Write the Guard, Orchestrator instructions, and `.orca-hub/hub.json` into an existing Hub folder |
 | `scripts/frontier.sh` | List open, unblocked, unassigned `ready-for-agent` Issues across the configured repos (read-only) |
-| `scripts/issue-dispatch.sh` | Claim an Issue and create the Task; print the `worker-start` and `worktree set` to run; from the `worker-start` receipt, post the Mapping comment |
+| `scripts/issue-dispatch.sh` | Two steps. Step 1: claim an Issue, create the Task, print the `worker-start` to run. Step 2 (`--receipt`): from the `worker-start` receipt, post the Mapping comment and print `worktree set` |
 | `scripts/issue-closeout.sh` | From the `worker_done`, post the success or failure comment; on failure add `needs-info` and unassign; print `worker-release` |
 | `scripts/issue-audit.sh` | List in-flight Issues whose PR is merged but which are still open; `--apply` comments a close-it-by-hand notice |
 | `scripts/issue-recover.sh` | After an Orca restart: read the latest Mapping block per in-flight Issue, reconcile with Orca, print (`--apply`: run) `run-use` |
@@ -65,11 +66,15 @@ Nothing under `~/.claude`, `~/.codex`, or `~/.orca` is touched.
 
 ## Typical requests
 
+Each one is a stretch of **The loop** in `references/issue-sync.md`; follow it there.
+
 - **"take #123"** — dispatch in two steps, then supervise:
-  1. `issue-dispatch.sh <owner>/<repo> 123` (preview), then `--apply`: claims the Issue, creates the Task, and prints `worker-start`.
-  2. Run that `worker-start` and pipe its receipt into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`: it posts the Mapping comment, or prints the retry command when `worker-start` failed.
+  1. `issue-dispatch.sh <owner>/<repo> 123` (preview), then `--apply`: claims the Issue, creates the Task, and prints `worker-start` (it never runs it).
+  2. Run that `worker-start` and pipe its receipt into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`: it posts the Mapping comment and prints `orca worktree set` to run, or, on `agent_readiness`, the retry `worker-start`.
+  3. Wait with `orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 570000 --json`; ignore heartbeats, repeat after an empty wait. Answer a Worker `ask` from the Issue and repo facts, else relay it to the human.
 - **"take the next one"** — run `frontier.sh`, pick the first Issue, then as above. Only when a human asks.
-- **A `worker_done` arrived** — pipe `orca orchestration check --json` into `issue-closeout.sh <owner>/<repo> 123 <succeeded|failed> -` (on failure add `--needs`), preview then `--apply`; then run the printed `worker-release`. After PRs merge, run `issue-audit.sh` and close leftover Issues by hand.
+- **A `worker_done` arrived** — pipe `orca orchestration check --json` into `issue-closeout.sh <owner>/<repo> 123 <succeeded|failed> -` (on failure add `--needs`), preview then `--apply`; run the printed `worker-release`; then `--ack` the delivery.
+- **PRs merged** — `issue-audit.sh`, then a human closes the Issues it lists.
 - **After an Orca restart** — `issue-recover.sh` (preview), then `--apply` to re-bind the Run; act on each Issue's reported state.
 
 ## Rules that do not bend
@@ -83,12 +88,23 @@ Nothing under `~/.claude`, `~/.codex`, or `~/.orca` is touched.
 
 ## Verified environment
 
+The scripts are verified by the five test suites in `tests/` (fake `gh` and `orca`) and shellcheck. A real run has not been recorded yet: the humans run `references/e2e-checklist.md`, record versions and outcomes there, and copy the result into this table, filing every deviation as a new Issue.
+
 | Component | Version | Status |
 |-----------|---------|--------|
-| Orca | 1.4.x | verified |
-| Claude Code | 2.1.x | verified (hook fires in subagents; hook deny blocks Write) |
+| Orca | 1.4.x | CLI verbs and JSON shapes verified while building; real end-to-end **unverified** |
+| Claude Code | 2.1.x | Guard verified (hook fires in subagents; hook deny blocks Write); real end-to-end **unverified** |
 | gh | 2.9x | verified |
 | Codex CLI | 0.15x | **unverified** — the `-c projects.<hub-dir>.trust_level=trusted` injection is untested; confirm with `/status` that the sandbox is read-only |
+
+| End-to-end part (checklist step) | Status |
+|----------------------------------|--------|
+| init-hub dry-run / apply on a real Hub folder (2) | unverified |
+| Guard in a real session (5) | unverified |
+| One Issue: claim, Worker, PR, closeout, release (6) | unverified |
+| Merge and audit (7) | unverified |
+| Orca restart and `issue-recover` (8) | unverified |
+| Codex launch and `/status` read-only (9) | unverified |
 
 ## Out of scope
 
