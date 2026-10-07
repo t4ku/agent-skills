@@ -12,9 +12,11 @@
 # edits survive. A second run with the same arguments reports "No changes."
 #
 # The Hub folder must be an Orca folder workspace (`orca repo list --json`
-# reports it with kind "folder"); otherwise the setup command is printed and
-# the script exits 2. Nothing outside the Hub folder is written, in particular
-# nothing under ~/.claude, ~/.codex or ~/.orca.
+# reports it with kind "folder", or `orca worktree ps --json` with
+# workspaceKind "folder-workspace", as for a folder created in the Orca app);
+# otherwise the setup command is printed and the script exits 2. Nothing
+# outside the Hub folder is written, in particular nothing under ~/.claude,
+# ~/.codex or ~/.orca.
 #
 # Dependencies: bash (3.2+), jq, coreutils, orca. What the written files do:
 # references/guard.md. Tests: tests/init-hub.test.sh.
@@ -92,6 +94,7 @@ not_workspace() {
   printf 'Create the folder and register it with Orca as a folder workspace, then run init-hub again:\n\n' >&2
   [ -d "$1" ] || printf '  mkdir -p %s\n' "$1" >&2
   printf '  orca project setup-existing-folder --project <project-id> --host local --path %s --kind folder\n\n' "$1" >&2
+  printf 'or add the folder in the Orca app.\n' >&2
   echo "(Run \`orca project list\` to see the project ids.)" >&2
   exit 2
 }
@@ -100,22 +103,56 @@ not_workspace() {
 hub_real="$(cd "$hub_arg" && pwd -P)" || die "cannot enter $hub_arg"
 
 command -v orca >/dev/null 2>&1 || not_workspace "$hub_real" "the orca CLI is not on PATH, so the folder cannot be confirmed as an Orca folder workspace."
-repo_json="$(orca repo list --json 2>/dev/null)" ||
-  not_workspace "$hub_real" "orca repo list failed (is Orca running?), so the folder cannot be confirmed as an Orca folder workspace."
 
 # hub_path is the path Orca holds for the folder: sessions it starts there get
 # it as $CLAUDE_PROJECT_DIR, and the Guard judges only on an exact match.
-hub_path=""
-while IFS= read -r p; do
-  [ -n "$p" ] || continue
-  if [ "$(cd "$p" 2>/dev/null && pwd -P)" = "$hub_real" ]; then
-    hub_path="${p%/}"
-    break
-  fi
-done <<EOF
-$(printf '%s' "$repo_json" | jq -r '.result.repos[]? | select(.kind == "folder") | .path // empty' 2>/dev/null)
+# Two sources know folder workspaces: `orca repo list` (kind "folder") and
+# `orca worktree ps` (workspaceKind "folder-workspace"). A Hub folder created
+# in the Orca app appears only in the second; its row also carries the worktree
+# id and display name recorded in hub.json.
+
+# matching_row <rows of path, worktree id, display name>: print the first row
+# whose path resolves to the Hub folder. Fields are separated by \037 so that
+# empty ones survive read.
+matching_row() {
+  local p rest
+  while IFS=$'\037' read -r p rest; do
+    [ -n "$p" ] || continue
+    if [ "$(cd "$p" 2>/dev/null && pwd -P)" = "$hub_real" ]; then
+      printf '%s\037%s\n' "${p%/}" "$rest"
+      return 0
+    fi
+  done <<EOF
+$1
 EOF
-[ -n "$hub_path" ] || not_workspace "$hub_real" "$hub_real is not an Orca folder workspace."
+  return 1
+}
+
+failed_sources=""
+list_row=""
+ps_row=""
+if json="$(orca repo list --json 2>/dev/null)"; then
+  list_row="$(matching_row "$(printf '%s' "$json" | jq -r '.result.repos[]? | select(.kind == "folder") | [.path // "", "", ""] | join("\u001f")' 2>/dev/null)")"
+else
+  failed_sources="orca repo list"
+fi
+if json="$(orca worktree ps --json 2>/dev/null)"; then
+  ps_row="$(matching_row "$(printf '%s' "$json" | jq -r '.result.worktrees[]? | select(.workspaceKind == "folder-workspace") | [.path // "", .worktreeId // "", .displayName // ""] | join("\u001f")' 2>/dev/null)")"
+else
+  failed_sources="${failed_sources:+$failed_sources and }orca worktree ps"
+fi
+if [ -z "$list_row$ps_row" ]; then
+  [ -z "$failed_sources" ] ||
+    not_workspace "$hub_real" "$failed_sources failed (is Orca running?), so the folder cannot be confirmed as an Orca folder workspace."
+  not_workspace "$hub_real" "$hub_real is not an Orca folder workspace: neither \`orca repo list --json\` (kind \"folder\") nor \`orca worktree ps --json\` (workspaceKind \"folder-workspace\") reports it."
+fi
+# The repo list path wins (as before); the Orca ids come from worktree ps only.
+IFS=$'\037' read -r hub_path _ _ <<EOF
+${list_row:-$ps_row}
+EOF
+IFS=$'\037' read -r _ orca_worktree_id orca_display_name <<EOF
+$ps_row
+EOF
 
 # --- staging ----------------------------------------------------------------------
 
@@ -249,12 +286,15 @@ check_json_object .orca-hub/hub.json
 hub_old="$(existing_json .orca-hub/hub.json)"
 printf '%s' "${hub_old:-null}" | jq \
   --arg hub "$hub_path" --arg default_id "$default_id" --arg id "$hub_id" --arg conc "$concurrency" \
+  --arg wt "$orca_worktree_id" --arg wt_name "$orca_display_name" \
   --argjson repos "$(json_array ${repos[@]+"${repos[@]}"})" \
   --argjson allow "$(json_array ${bash_allow[@]+"${bash_allow[@]}"})" '
   (. // {hub_id: $default_id, hub_path: $hub, concurrency: 1, repos: [], bash_allow: []})
   | .hub_path = $hub
   | .hub_id = (if $id != "" then $id else (.hub_id // $default_id) end)
   | if $conc != "" then .concurrency = ($conc | tonumber) else . end
+  | if $wt != "" then .orca_worktree_id = $wt else . end
+  | if $wt_name != "" then .orca_display_name = $wt_name else . end
   | .repos = ((.repos // []) as $r | $r + [$repos[] | . as $n | select($r | any(.name == $n) | not) | {name: .}])
   | .bash_allow = ((.bash_allow // []) as $b | $b + [$allow[] | . as $x | select($b | any(. == $x) | not)])
 ' > "$(staged .orca-hub/hub.json)" || die "could not build .orca-hub/hub.json"

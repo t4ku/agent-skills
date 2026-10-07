@@ -1,0 +1,5 @@
+{"ok": true, "result": {"hostScope": "local", "totalCount": 3, "truncated": false, "worktrees": [
+  {"workspaceKind": "folder-workspace", "worktreeId": "folder:00000000-0000-4000-8000-000000000001", "repoId": "folder-workspace:00000000-0000-4000-8000-000000000002", "repo": "example", "displayName": "example-hub", "path": "<hub-dir>", "branch": "", "isMainWorktree": false, "linkedIssue": null},
+  {"workspaceKind": "git", "worktreeId": "repo-app-id::<repo-dir>", "repoId": "repo-app-id", "repo": "app", "displayName": "app", "path": "<repo-dir>", "branch": "refs/heads/main", "isMainWorktree": true, "linkedIssue": null},
+  {"workspaceKind": "git", "worktreeId": "repo-app-id::<worktree-dir>", "repoId": "repo-app-id", "repo": "app", "displayName": "feature", "path": "<worktree-dir>", "branch": "refs/heads/feature", "isMainWorktree": false, "linkedIssue": null}
+]}}
