@@ -5,11 +5,15 @@
 # Usage: init-hub.sh <hub-dir> [--apply] [--hub-id <id>] [--repo <owner>/<repo>]...
 #                    [--concurrency <n>] [--bash-allow <command>]...
 #
-# Dry-run by default: prints the plan (create / update / keep for every file)
-# and writes nothing. With --apply it writes the plan. Every file it replaces
-# is first renamed to <file>.bak.<timestamp>; .claude/settings.json and
-# .orca-hub/hub.json are merged with jq, so existing hooks, denies and hand
-# edits survive. A second run with the same arguments reports "No changes."
+# Dry-run by default: prints the plan (create / update / keep for every file,
+# append block / update block for CLAUDE.md and AGENTS.md) and writes nothing.
+# With --apply it writes the plan. Every file it changes is first backed up as
+# <file>.bak.<timestamp>; .claude/settings.json and .orca-hub/hub.json are
+# merged with jq, so existing hooks, denies and hand edits survive. An existing
+# CLAUDE.md or AGENTS.md only gains (or has updated) the lines between
+# <!-- orca-issue-orchestrator:start --> and <!-- orca-issue-orchestrator:end -->;
+# every other byte is kept. A second run with the same arguments reports
+# "No changes."
 #
 # The Hub folder must be an Orca folder workspace (`orca repo list --json`
 # reports it with kind "folder", or `orca worktree ps --json` with
@@ -31,6 +35,8 @@ HOOK_MATCHER='Bash|Edit|Write|NotebookEdit'
 DENY_JSON='["Bash(rm -rf *)","Bash(git push *)","Bash(gh issue close *)","Bash(gh issue delete *)","Bash(gh pr merge *)","Bash(gh repo delete *)"]'
 AGENT_TOOLS='Read, Grep, Glob, Bash, Agent, Skill, WebFetch, WebSearch, TodoWrite'
 EMPTY_DIRS='docs research tmp'
+BLOCK_START='<!-- orca-issue-orchestrator:start -->'
+BLOCK_END='<!-- orca-issue-orchestrator:end -->'
 
 usage() {
   sed -n 's/^# \{0,1\}//; 5,6p' "${BASH_SOURCE[0]}"
@@ -225,17 +231,78 @@ json_array() {
   fi
 }
 
-# CLAUDE.md and AGENTS.md
-cat > "$(staged CLAUDE.md)" <<'EOF'
-# Hub folder
+# CLAUDE.md and AGENTS.md: the Orchestrator block between BLOCK_START and
+# BLOCK_END. An existing file keeps every byte outside the markers.
+BLOCK="$STAGE/.block.md"
+cat > "$BLOCK" <<EOF
+$BLOCK_START
+<!-- Written by orca-issue-orchestrator init-hub. A re-run replaces only the lines between these markers. -->
+## Orchestrator
 
-This is the Hub folder of the orca-issue-orchestrator skill. As the Orchestrator, follow `/orca-issue-orchestrator`: read Issues, delegate every code change to an Orca Worker, supervise it, and sync the outcome back to the Issue.
-Never edit code here or in the repos; the Guard (`.orca-hub/guard.sh`) denies it. Config: `.orca-hub/hub.json`.
-Research notes go in `research/`, durable notes in `docs/`, scratch in `tmp/`.
+This is the Hub folder of the orca-issue-orchestrator skill. As the Orchestrator, follow \`/orca-issue-orchestrator\`: read Issues, delegate every code change to an Orca Worker, supervise it, and sync the outcome back to the Issue.
+Never edit code here or in the repos; the Guard (\`.orca-hub/guard.sh\`) denies it. Config: \`.orca-hub/hub.json\`.
+Research notes go in \`research/\`, durable notes in \`docs/\`, scratch in \`tmp/\`.
+$BLOCK_END
 EOF
-stage CLAUDE.md
-cp "$STAGE/CLAUDE.md" "$(staged AGENTS.md)"
-stage AGENTS.md
+
+# marker_lines <file> <marker>: the line numbers of <marker> (LF or CRLF), one per line.
+marker_lines() {
+  grep -n -x -F -e "$2" -e "$2"$'\r' -- "$1" | cut -d: -f1
+}
+
+# stage_block <relative path>: stage the file with the block merged in and
+# record create / append block / update block / keep. A missing file, a
+# symlink or a non-file gets a new file (create / update, as stage does).
+stage_block() {
+  local rel="$1" target="$hub_real/$1" out starts ends n1 n2
+  inside_hub "$rel" || die "$rel resolves outside the Hub folder; refusing to write through a symlink"
+  out="$(staged "$rel")"
+  if [ -L "$target" ] || [ ! -f "$target" ]; then
+    { printf '# Hub folder\n\n'; cat "$BLOCK"; } > "$out"
+    stage "$rel"
+    return
+  fi
+  starts="$(marker_lines "$target" "$BLOCK_START")"
+  ends="$(marker_lines "$target" "$BLOCK_END")"
+  plan_paths+=("$rel")
+  if [ -z "$starts$ends" ]; then
+    # Append after one blank line (none for an empty file): count the
+    # newlines among the last one and the last two bytes.
+    n1=$(($(tail -c 1 -- "$target" | wc -l)))
+    n2=$(($(tail -c 2 -- "$target" | wc -l)))
+    {
+      cat -- "$target"
+      if [ ! -s "$target" ] || [ "$n2" -eq 2 ]; then
+        :
+      elif [ "$n1" -eq 1 ]; then
+        printf '\n'
+      else
+        printf '\n\n'
+      fi
+      cat "$BLOCK"
+    } > "$out"
+    plan_actions+=("append block")
+    return
+  fi
+  case "$starts $ends" in
+    *[!0-9\ ]*) die "$rel has more than one $BLOCK_START or $BLOCK_END line; fix it by hand" ;;
+  esac
+  [ -n "$starts" ] && [ -n "$ends" ] && [ "$starts" -lt "$ends" ] ||
+    die "$rel has an unmatched $BLOCK_START or $BLOCK_END line; fix it by hand"
+  {
+    [ "$starts" -le 1 ] || head -n "$((starts - 1))" -- "$target"
+    cat "$BLOCK"
+    tail -n "+$((ends + 1))" -- "$target"
+  } > "$out"
+  if cmp -s "$out" "$target"; then
+    plan_actions+=(keep)
+  else
+    plan_actions+=("update block")
+  fi
+}
+
+stage_block CLAUDE.md
+stage_block AGENTS.md
 
 # .claude/settings.json: add the Guard hook and the denies; keep everything else.
 guard_path="$hub_path/.orca-hub/guard.sh"
@@ -380,6 +447,15 @@ while [ "$i" -lt "${#plan_paths[@]}" ]; do
     update)
       backup="$(backup_name "$rel")"
       printf '  update  %s (backup: %s)\n' "$rel" "$backup" ;;
+    *block)
+      backup="$(backup_name "$rel")"
+      printf '  %s %s (backup: %s)\n' "$action" "$rel" "$backup"
+      changes=$((changes + 1))
+      [ "$apply" -eq 1 ] || continue
+      # Copy, then rewrite in place: the file keeps its mode and inode.
+      cp -p -- "$target" "$hub_real/$backup" || die "cannot back up $rel"
+      cat -- "$STAGE/$rel" > "$target" || die "cannot write $rel"
+      continue ;;
   esac
   changes=$((changes + 1))
   [ "$apply" -eq 1 ] || continue
