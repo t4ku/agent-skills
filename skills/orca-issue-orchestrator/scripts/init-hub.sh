@@ -14,8 +14,9 @@
 # The Hub folder must be an Orca folder workspace (`orca repo list --json`
 # reports it with kind "folder", or `orca worktree ps --json` with
 # workspaceKind "folder-workspace", as for a folder created in the Orca app);
-# otherwise the setup command is printed and the script exits 2. Nothing outside the Hub folder is written, in particular
-# nothing under ~/.claude, ~/.codex or ~/.orca.
+# otherwise the setup command is printed and the script exits 2. Nothing
+# outside the Hub folder is written, in particular nothing under ~/.claude,
+# ~/.codex or ~/.orca.
 #
 # Dependencies: bash (3.2+), jq, coreutils, orca. What the written files do:
 # references/guard.md. Tests: tests/init-hub.test.sh.
@@ -106,23 +107,19 @@ command -v orca >/dev/null 2>&1 || not_workspace "$hub_real" "the orca CLI is no
 # hub_path is the path Orca holds for the folder: sessions it starts there get
 # it as $CLAUDE_PROJECT_DIR, and the Guard judges only on an exact match.
 # Two sources know folder workspaces: `orca repo list` (kind "folder") and
-# `orca worktree ps` (workspaceKind "folder-workspace"; a Hub folder created in
-# the Orca app appears only there, with its worktree id and display name).
-hub_path=""
-orca_worktree_id=""
-orca_display_name=""
+# `orca worktree ps` (workspaceKind "folder-workspace"). A Hub folder created
+# in the Orca app appears only in the second; its row also carries the worktree
+# id and display name recorded in hub.json.
 
-# match_path <rows of path, worktree id, display name, separated by \037 so
-# that empty fields survive read>: set hub_path (and the Orca ids) from the
-# first row whose path resolves to the Hub folder.
-match_path() {
-  local p id name
-  while IFS=$'\037' read -r p id name; do
+# matching_row <rows of path, worktree id, display name>: print the first row
+# whose path resolves to the Hub folder. Fields are separated by \037 so that
+# empty ones survive read.
+matching_row() {
+  local p rest
+  while IFS=$'\037' read -r p rest; do
     [ -n "$p" ] || continue
     if [ "$(cd "$p" 2>/dev/null && pwd -P)" = "$hub_real" ]; then
-      hub_path="${p%/}"
-      orca_worktree_id="$id"
-      orca_display_name="$name"
+      printf '%s\037%s\n' "${p%/}" "$rest"
       return 0
     fi
   done <<EOF
@@ -131,24 +128,31 @@ EOF
   return 1
 }
 
-failed=0
-if repo_json="$(orca repo list --json 2>/dev/null)"; then
-  match_path "$(printf '%s' "$repo_json" | jq -r '.result.repos[]? | select(.kind == "folder") | [.path // "", "", ""] | join("\u001f")' 2>/dev/null)"
+failed_sources=""
+list_row=""
+ps_row=""
+if json="$(orca repo list --json 2>/dev/null)"; then
+  list_row="$(matching_row "$(printf '%s' "$json" | jq -r '.result.repos[]? | select(.kind == "folder") | [.path // "", "", ""] | join("\u001f")' 2>/dev/null)")"
 else
-  failed=$((failed + 1))
+  failed_sources="orca repo list"
 fi
-if [ -z "$hub_path" ]; then
-  if ps_json="$(orca worktree ps --json 2>/dev/null)"; then
-    match_path "$(printf '%s' "$ps_json" | jq -r '.result.worktrees[]? | select(.workspaceKind == "folder-workspace") | [.path // "", .worktreeId // "", .displayName // ""] | join("\u001f")' 2>/dev/null)"
-  else
-    failed=$((failed + 1))
-  fi
+if json="$(orca worktree ps --json 2>/dev/null)"; then
+  ps_row="$(matching_row "$(printf '%s' "$json" | jq -r '.result.worktrees[]? | select(.workspaceKind == "folder-workspace") | [.path // "", .worktreeId // "", .displayName // ""] | join("\u001f")' 2>/dev/null)")"
+else
+  failed_sources="${failed_sources:+$failed_sources and }orca worktree ps"
 fi
-if [ -z "$hub_path" ]; then
-  [ "$failed" -lt 2 ] ||
-    not_workspace "$hub_real" "orca repo list and orca worktree ps failed (is Orca running?), so the folder cannot be confirmed as an Orca folder workspace."
+if [ -z "$list_row$ps_row" ]; then
+  [ -z "$failed_sources" ] ||
+    not_workspace "$hub_real" "$failed_sources failed (is Orca running?), so the folder cannot be confirmed as an Orca folder workspace."
   not_workspace "$hub_real" "$hub_real is not an Orca folder workspace: neither \`orca repo list --json\` (kind \"folder\") nor \`orca worktree ps --json\` (workspaceKind \"folder-workspace\") reports it."
 fi
+# The repo list path wins (as before); the Orca ids come from worktree ps only.
+IFS=$'\037' read -r hub_path _ _ <<EOF
+${list_row:-$ps_row}
+EOF
+IFS=$'\037' read -r _ orca_worktree_id orca_display_name <<EOF
+$ps_row
+EOF
 
 # --- staging ----------------------------------------------------------------------
 

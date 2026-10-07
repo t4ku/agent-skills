@@ -35,7 +35,7 @@ The Hub folder's machine-readable config. `init-hub` writes it to `<hub-dir>/.or
 | `repos[].base_branch` | string | no | Base branch for Worker worktrees. Defaults to the repo's default branch. |
 | `repos[].constraints[]` | array of strings | no | Extra constraints pasted into every Spec for this repo. |
 | `bash_allow[]` | array of strings | no | Extra command names the Guard allows as the first word of a Bash segment, on top of the default allowlist. Matched as exact strings. |
-| `orca_worktree_id` | string | no | Orca's worktree id of the Hub folder (`folder:<uuid>`), so later scripts can address it as `id:folder:<uuid>`. Written by `init-hub` when it finds the Hub folder in `orca worktree ps --json` (a row with `workspaceKind: "folder-workspace"`, as for a folder created in the Orca app); absent when only `orca repo list --json` knows the folder. |
+| `orca_worktree_id` | string | no | Orca's worktree id of the Hub folder (`folder:<uuid>`), so later scripts can address it as `id:folder:<uuid>`. Written by `init-hub` when it finds the Hub folder in `orca worktree ps --json` (a row with `workspaceKind: "folder-workspace"`, as for a folder created in the Orca app); left as it is when no such row exists (the folder is known to `orca repo list --json` only). |
 | `orca_display_name` | string | no | The Hub folder's `displayName` in that same `orca worktree ps --json` row. |
 
 ## How the Guard uses it

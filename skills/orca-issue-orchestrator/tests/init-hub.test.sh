@@ -42,14 +42,14 @@ echo '{}' > "$FAKE_HOME/.orca/state.json"
 # $WORK/orca-folders (one path per line) as an Orca folder workspace.
 # `worktree ps --json` answers the recorded fixture plus, for every folder
 # listed in $WORK/app-folders, a copy of its folder-workspace row (a Hub folder
-# created in the Orca app) with that path. A file $WORK/<subcommand>.fail
-# makes that call fail.
+# created in the Orca app) with that path. A file $WORK/repo-list.fail or
+# $WORK/worktree-ps.fail makes that call fail.
 BIN="$WORK/bin"
 mkdir -p "$BIN"
 cat > "$BIN/orca" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$ORCA_LOG"
-if [ -e "$ORCA_STATE/$2.fail" ]; then
+if [ -e "$ORCA_STATE/$1-$2.fail" ]; then
   echo "fake orca: $1 $2 set to fail" >&2
   exit 1
 fi
@@ -307,20 +307,34 @@ run_init "$WORK/app-link"
 check "app folder through a symlink is matched by realpath" [ "$CODE" -eq 0 ]
 check "app folder through a symlink plans for the path Orca holds" contains "$OUT" "plan for $APP (dry-run)"
 
-touch "$WORK/list.fail"
+touch "$WORK/repo-list.fail"
 run_init "$APP"
 check "app folder is accepted when orca repo list fails" [ "$CODE" -eq 0 ]
-rm -f "$WORK/list.fail"
+rm -f "$WORK/repo-list.fail"
+
+BOTH="$(new_hub both-sources)"
+printf '%s\n' "$BOTH" >> "$ORCA_APP_FOLDERS"
+run_init "$BOTH" --apply
+check "a folder known to both sources is accepted" [ "$CODE" -eq 0 ]
+check "a folder known to both sources records orca_worktree_id from worktree ps" \
+  jq -e --arg id "$PS_ID" '.orca_worktree_id == $id' "$BOTH/.orca-hub/hub.json"
+
+mkdir -p "$WORK/ps-only-missing"
+touch "$WORK/repo-list.fail"
+run_init "$WORK/ps-only-missing"
+check "an unknown folder with one source failing exits non-zero" [ "$CODE" -ne 0 ]
+check "an unknown folder with one source failing names the failed call" contains "$OUT" "orca repo list failed (is Orca running?)"
+rm -f "$WORK/repo-list.fail"
 
 HUB6="$(new_hub both-fail)"
-touch "$WORK/ps.fail"
+touch "$WORK/worktree-ps.fail"
 run_init "$HUB6"
 check "a repo list folder does not need worktree ps" [ "$CODE" -eq 0 ]
-touch "$WORK/list.fail"
+touch "$WORK/repo-list.fail"
 run_init "$HUB6"
 check "both sources failing exits non-zero" [ "$CODE" -ne 0 ]
 check "both sources failing says Orca may not be running" contains "$OUT" "is Orca running?"
-rm -f "$WORK/list.fail" "$WORK/ps.fail"
+rm -f "$WORK/repo-list.fail" "$WORK/worktree-ps.fail"
 
 # --- not an Orca folder workspace ------------------------------------------------
 
