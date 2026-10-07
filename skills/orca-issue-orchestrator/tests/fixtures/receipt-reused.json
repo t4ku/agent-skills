@@ -1,0 +1,18 @@
+{"ok": true, "result": {
+  "dispatch": {"id": "ctx_test3", "runId": "run_test1", "taskId": "task_test1", "status": "dispatched"},
+  "worker": {
+    "dispatchId": "ctx_test3",
+    "state": "ready",
+    "stage": "input_accepted",
+    "worktreeId": "repo-app-id::/path/to/worktrees/issue-7-login-page-folder",
+    "agentTerminalHandle": "term_test3",
+    "effects": [
+      {"kind": "worktree", "action": "reused", "id": "repo-app-id::/path/to/worktrees/issue-7-login-page-folder"},
+      {"kind": "terminal", "role": "agent", "action": "created", "id": "term_test3"}
+    ],
+    "residualResources": [
+      {"kind": "terminal", "role": "agent", "action": "created", "id": "term_test3"}
+    ],
+    "startOptions": {"worktree": "identity:wt2:local:inst-7f"}
+  }
+}}

@@ -15,21 +15,21 @@ The whole procedure, one Issue at a time. Each step names its script; the sectio
    <skill-dir>/scripts/frontier.sh
    ```
 
-2. **Claim and create the Task** ([step 1](#step-1-claim-and-create-the-task)): preview, then apply. It prints the `worker-start` and the `worktree set` to run; it runs neither.
+2. **Claim and create the Task** ([step 1](#step-1-claim-and-create-the-task)): preview, then apply. It prints the placement to run and runs none of it: in a git Hub one `worker-start --worktree new-top-level` plus `worktree set`; in a folder-workspace Hub (`hub.json` `orca_worktree_id` is `folder:<uuid>`) `worktree create --issue 123 --parent-worktree folder:<uuid>`, then `worker-start --worktree identity:<key>` (see [Two placements](#two-placements)).
 
    ```sh
    <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123
    <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123 --apply
    ```
 
-3. **Start the Worker and post the Mapping comment** ([step 2](#step-2-start-the-worker-link-the-worktree-post-the-mapping-comment)): run the printed `worker-start` and pipe its receipt into step 2, then run the `orca worktree set` it prints.
+3. **Start the Worker and post the Mapping comment** ([step 2](#step-2-start-the-worker-link-the-worktree-post-the-mapping-comment)): run the printed placement and pipe the `worker-start` receipt into step 2, then run the `orca worktree set` it prints (a git Hub only; a folder Hub's `worktree create --issue` already linked it).
 
    ```sh
    orca orchestration worker-start --task <task_id> ... --json \
      | <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply
    ```
 
-   On exit 3 with `agent_readiness`, check the agent with `orca orchestration worker-show --dispatch <dispatch_id> --json`, run the printed retry `worker-start`, and pipe that receipt into step 2 again. Any other failed stage: do not relaunch (see step 2).
+   On exit 3 with `not_a_repo`, the Hub is a folder workspace: run the two printed commands instead, never a retry. On exit 3 with `agent_readiness`, check the agent with `orca orchestration worker-show --dispatch <dispatch_id> --json`, run the printed retry `worker-start`, and pipe that receipt into step 2 again. Any other failed stage: do not relaunch (see step 2).
 4. **Wait** for the Worker:
 
    ```sh
@@ -109,21 +109,38 @@ With `--apply` it then, in this order:
 
 1. **Claims**: `gh issue edit 123 -R <owner>/<repo> --add-assignee @me`.
 2. **Creates the Task**: `orca orchestration task-create --task-title "#123 <Issue title>" --spec <Spec> --json`.
-3. **Prints, never runs**, the Worker start and the worktree link:
-
-   ```sh
-   orca orchestration worker-start --task <task_id> --worktree new-top-level --repo id:<repo-id> \
-     --name issue-123-<slug> --base-branch <base> --agent claude --setup skip --timeout-ms 300000 --json
-   orca worktree set --worktree id:<worktree_id> --issue 123 --json
-   ```
+3. **Prints, never runs**, the Worker placement for this Hub (see [Two placements](#two-placements)).
 
    `<slug>` is the first three ASCII words of the title. `<base>` is the repo's `base_branch` in `hub.json`, else its default branch. Keep `--timeout-ms 300000`: with Orca's default timeout `worker-start` has failed at `agent_readiness` while the terminal was in fact live.
+
+#### Two placements
+
+Which commands step 1 prints depends on what the Hub folder is in Orca, read from `hub.json` `orca_worktree_id` (written by `init-hub`):
+
+- **Git Hub** (the Hub is a git worktree; `orca_worktree_id` is `<repo-id>::<path>` or absent): one `worker-start` creates a top-level worktree, then `worktree set` links it to the Issue.
+
+  ```sh
+  orca orchestration worker-start --task <task_id> --worktree new-top-level --repo id:<repo-id> \
+    --name issue-123-<slug> --base-branch <base> --agent claude --setup skip --timeout-ms 300000 --json
+  orca worktree set --worktree id:<worktree_id> --issue 123 --json
+  ```
+
+- **Folder Hub** (an Orca folder workspace; `orca_worktree_id` is `folder:<uuid>`): `worker-start --worktree new-top-level` refuses it with `{"ok":false,"error":"not_a_repo"}`, even with a valid `--repo`. Create the worktree first, under the Hub folder and linked to the Issue, then start the Worker on it by its `identity.key` from the `worktree create` receipt (`result.worktree.identity.key`). The `--parent-worktree` lineage places the Worker's worktree under the Hub in Orca's sidebar, and `--issue` replaces `worktree set`.
+
+  ```sh
+  orca worktree create --repo id:<repo-id> --name issue-123-<slug> --base-branch <base> --issue 123 \
+    --setup skip --parent-worktree folder:<uuid> --json
+  orca orchestration worker-start --task <task_id> --worktree identity:<identity_key> --agent claude \
+    --timeout-ms 300000 --json
+  ```
+
+  Piping the `worktree create` receipt into step 2 (`--receipt -`) prints that `worker-start` with the key filled in. Its receipt's `effects[]` worktree row says `action: "reused"` instead of `created_top_level`; step 2 takes it like any other.
 
 If the claim fails nothing else happens. If `task-create` fails after the claim, the Issue stays assigned to you: fix the cause and create the Task by hand, or unassign.
 
 ### Step 2: start the Worker, link the worktree, post the Mapping comment
 
-Run the printed `worker-start` yourself and pipe its JSON receipt into step 2:
+Run the printed placement yourself and pipe the `worker-start` JSON receipt into step 2:
 
 ```sh
 orca orchestration worker-start --task <task_id> ... --json \
@@ -132,8 +149,8 @@ orca orchestration worker-start --task <task_id> ... --json \
 
 (`--receipt <file>` reads a saved receipt instead.) Step 2:
 
-- Reads `dispatchId`, `taskId`, `runId`, and the worktree id (`<repo-id>::<path>`) from the receipt, then the worktree's `identity.key` and branch from `orca worktree list --json`. Unless that list answers `{ok: true}` with a `result.worktrees` array (as in recovery), it exits 1 with the raw answer on stderr and posts nothing, so an Orca error never passes for "the worktree is not listed".
-- Prints `orca worktree set --worktree id:<worktree_id> --issue 123 --json`; run it yourself so Orca's sidebar shows the Issue.
+- Reads `dispatchId`, `taskId`, `runId`, and the worktree id (`worktreeId`, else the `effects[]` worktree row: `created_top_level` or `reused`) from the receipt, then the worktree's `identity.key`, branch, display name, and linked Issue from `orca worktree list --json` (a row matches by `id` or by `identity.key`). Unless that list answers `{ok: true}` with a `result.worktrees` array (as in recovery), it exits 1 with the raw answer on stderr and posts nothing, so an Orca error never passes for "the worktree is not listed".
+- Prints `orca worktree set --worktree id:<worktree_id> --issue 123 --json` unless the worktree is already linked to Issue 123 (the folder placement's `worktree create --issue`); run it yourself so Orca's sidebar shows the Issue.
 - Posts the Mapping comment with `gh issue comment 123 -R <owner>/<repo> --body-file -`, unless a Mapping comment for the same Dispatch is already on the Issue. It refuses to post a body that contains a local path (see [Local paths](#local-paths)), naming it on stderr.
 
 **When `worker-start` failed** (exit 3, no comment posted):
@@ -145,6 +162,7 @@ orca orchestration worker-start --task <task_id> ... --json \
     --worktree id:<worktree_id> --timeout-ms 300000 --json
   ```
 
+- `{"ok":false,"error":"not_a_repo"}`: `worker-start --worktree new-top-level` ran from a folder-workspace Hub. Do not retry it; run the printed folder placement (`worktree create ... --parent-worktree folder:<uuid>`, then `worker-start --worktree identity:<key>`) and feed that `worker-start` receipt to step 2.
 - Any other failed stage: do not relaunch. Follow the receipt's recovery commands and `references/recovery-and-cleanup.md` in `orca skills get orchestration --full`.
 
 ## Spec template
@@ -197,7 +215,7 @@ Dispatched to an Orca worker.
 | `repo`, `issue` | The arguments |
 | `run_id`, `task_id`, `dispatch_id` | The `worker-start` receipt |
 | `worktree_id` | The worktree's `identity.key` from `orca worktree list --json` (e.g. `wt2:local:<uuid>`); select it with `--worktree identity:<key>`. Never the `<repo-id>::<path>` id, which holds a local path |
-| `worktree` | The worktree's name as `worker-start` created it (`startOptions.name` in the receipt, else the branch). Closeout names the kept worktree from it and never recomputes it from the Issue title, which may change after dispatch. Blocks written before this field existed fall back to `branch` |
+| `worktree` | The worktree's name as it was created (`startOptions.name` in the receipt; for a reused worktree its `displayName` in `orca worktree list`; else the branch). Closeout names the kept worktree from it and never recomputes it from the Issue title, which may change after dispatch. Blocks written before this field existed fall back to `branch` |
 | `branch` | The worktree's branch, without `refs/heads/` |
 | `hub` | `hub_id` from `hub.json`, never a path |
 
@@ -374,4 +392,4 @@ npx --yes shellcheck skills/orca-issue-orchestrator/scripts/*.sh skills/orca-iss
   skills/orca-issue-orchestrator/tests/bin/gh skills/orca-issue-orchestrator/tests/bin/orca
 ```
 
-The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths; on closeout success one comment and no label or assignee change, on failure the label add, the unassign, and the comment in that order; `gh issue close` and `task-update` never invoked; recovery uses the latest of two Mapping blocks and runs only `run-use`; forged Mapping blocks from another author, or with a wrong repo, issue, hub, or version, are ignored by closeout, audit, recovery, and the concurrency count; a `--pr` that is merged, from another repo or a fork, or on another head branch refuses, as does a PR whose body does not start with `Closes #<n>` for this Issue; the closeout and audit markers carry the `hub` and a marker of another Hub suppresses nothing; a failing `worker-list`, an error or malformed `worker-list` page, `hasMore` without a cursor, a page loop past the cap, and an error or malformed `worktree list` each stop recovery; a `--pr` whose base is not the default branch refuses; a succeeded closeout without files refuses; a summary, `--evidence`, or `--files` holding `/tmp/…` or `/var/…` refuses unless `--redact`; a retitled Issue keeps the dispatched worktree name; a marker block for another Dispatch or PR, with prose naming ours, suppresses nothing; the in-flight and PR searches find what sits on page 2 or after 100 comments, and fail when GitHub truncates; a failing, error, malformed, or non-JSON `worktree list` stops dispatch step 2 before any comment). The fake `gh` answers `gh api user` from `user.json`, serves the in-flight search (`gh api graphql`) from `inflight-<owner>_<repo>.json` and the audit PR search (`gh api search/issues`) from `prs-<owner>_<repo>.json` in pages of `$FAKE_PAGE_SIZE` items (default 100; only the first page without `--paginate`), and answers `gh pr view <n>` from `pr-<owner>_<repo>-<n>.json`. `tests/helpers.sh` holds the shared setup.
+The tests put fake `gh` and `orca` (`tests/bin/`) first on `PATH`. They answer from recorded JSON in `tests/fixtures/` and log every call, and the tests assert on the printed plan, the exit code, and the call log (claim before `task-create`; `worker-start`, `worktree set`, and `task-update` never invoked; no mutation in dry-run; the Mapping block complete and free of paths; on closeout success one comment and no label or assignee change, on failure the label add, the unassign, and the comment in that order; `gh issue close` and `task-update` never invoked; recovery uses the latest of two Mapping blocks and runs only `run-use`; forged Mapping blocks from another author, or with a wrong repo, issue, hub, or version, are ignored by closeout, audit, recovery, and the concurrency count; a `--pr` that is merged, from another repo or a fork, or on another head branch refuses, as does a PR whose body does not start with `Closes #<n>` for this Issue; the closeout and audit markers carry the `hub` and a marker of another Hub suppresses nothing; a failing `worker-list`, an error or malformed `worker-list` page, `hasMore` without a cursor, a page loop past the cap, and an error or malformed `worktree list` each stop recovery; a `--pr` whose base is not the default branch refuses; a succeeded closeout without files refuses; a summary, `--evidence`, or `--files` holding `/tmp/…` or `/var/…` refuses unless `--redact`; a retitled Issue keeps the dispatched worktree name; a marker block for another Dispatch or PR, with prose naming ours, suppresses nothing; the in-flight and PR searches find what sits on page 2 or after 100 comments, and fail when GitHub truncates; a failing, error, malformed, or non-JSON `worktree list` stops dispatch step 2 before any comment; a folder-workspace `hub.json` plans `worktree create --issue --parent-worktree folder:<uuid>` then `worker-start --worktree identity:<key>` with no `worktree set`, a git one the single `new-top-level` `worker-start`; a `worker-start` receipt whose worktree effect is `reused` posts a Mapping comment with the real worktree name and branch; a `not_a_repo` receipt prints the folder placement, never a retry). The fake `gh` answers `gh api user` from `user.json`, serves the in-flight search (`gh api graphql`) from `inflight-<owner>_<repo>.json` and the audit PR search (`gh api search/issues`) from `prs-<owner>_<repo>.json` in pages of `$FAKE_PAGE_SIZE` items (default 100; only the first page without `--paginate`), and answers `gh pr view <n>` from `pr-<owner>_<repo>-<n>.json`. `tests/helpers.sh` holds the shared setup.

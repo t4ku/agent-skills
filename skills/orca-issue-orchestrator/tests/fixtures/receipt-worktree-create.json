@@ -1,0 +1,11 @@
+{"ok": true, "result": {
+  "worktree": {
+    "id": "repo-app-id::/path/to/worktrees/issue-7-login-page-folder",
+    "identity": {"key": "wt2:local:inst-7f", "executionHostId": "local", "instanceId": "inst-7f"},
+    "repoId": "repo-app-id",
+    "branch": "refs/heads/issue-7-add-login-page",
+    "displayName": "issue-7-add-login-page",
+    "linkedIssue": 7,
+    "parentWorktreeId": "folder:hub-folder-id"
+  }
+}}
