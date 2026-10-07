@@ -291,6 +291,43 @@ jq '.comments = [{"author": {"login": "mallory"}, "body": "<!-- orca-issue-orche
 run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
 check "receipt apply: a forged Mapping comment does not stop the real one" called "gh issue comment 7"
 
+# orca worktree list is held to {ok: true} with a result.worktrees array, as in
+# recovery: an error envelope must not pass for "the worktree is not listed".
+reset_fakes
+touch "$OVR/orca-worktree-list.json.fail"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply, worktree list fails: refuses" code_is 1
+check "receipt apply, worktree list fails: posts nothing" no_mutation
+check "receipt apply, worktree list fails: says the list failed" out_has "orca worktree list failed"
+
+reset_fakes
+echo '{"ok": false, "error": {"code": "runtime_unavailable", "message": "Orca is not running"}}' > "$OVR/orca-worktree-list.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply, worktree list error envelope: refuses" code_is 1
+check "receipt apply, worktree list error envelope: posts nothing" no_mutation
+check "receipt apply, worktree list error envelope: shows the error" out_has "runtime_unavailable"
+check "receipt apply, worktree list error envelope: never says the worktree is missing" out_lacks "is not in orca worktree list"
+
+reset_fakes
+echo '{"ok": true, "result": {"totalCount": 0}}' > "$OVR/orca-worktree-list.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply, worktree list without worktrees[]: refuses" code_is 1
+check "receipt apply, worktree list without worktrees[]: posts nothing" no_mutation
+check "receipt apply, worktree list without worktrees[]: never says the worktree is missing" out_lacks "is not in orca worktree list"
+
+reset_fakes
+echo 'not json' > "$OVR/orca-worktree-list.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply, worktree list not JSON: refuses" code_is 1
+check "receipt apply, worktree list not JSON: posts nothing" no_mutation
+
+reset_fakes
+jq '.result.worktrees = []' "$FIXTURES/orca-worktree-list.json" > "$OVR/orca-worktree-list.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-ready.json" --apply
+check "receipt apply, worktree not listed: refuses" code_is 1
+check "receipt apply, worktree not listed: posts nothing" no_mutation
+check "receipt apply, worktree not listed: says so" out_has "is not in orca worktree list"
+
 # --- issue-dispatch.sh --receipt: failed worker-start ------------------------------
 
 reset_fakes

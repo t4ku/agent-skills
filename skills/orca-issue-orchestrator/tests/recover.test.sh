@@ -73,6 +73,7 @@ jq '.result.workers[0].workerState = "ready" | .result.workers[0].projection.out
   "$FIXTURES/orca-worker-list-run_test12.json" > "$OVR/orca-worker-list-run_test12.json"
 run_json --hub "$HUB" --json
 check "json: a live in-progress worker is working" row 12 '.state == "working"'
+check "json: working: next is the loop's wait" row 12 '.next == ["orca","orchestration","check","--wait","--types","worker_done,escalation,question","--timeout-ms","570000","--json"]'
 
 reset_fakes
 in_flight_two

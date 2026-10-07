@@ -128,7 +128,7 @@ if [ -n "$receipt" ]; then
   [ -n "$dispatch_id" ] && [ -n "$task_id" ] && [ -n "$run_id" ] && [ -n "$worktree_id" ] ||
     die "the receipt lacks dispatchId, taskId, runId, or the worktree id"
 
-  worktree="$(orca_worktree "$worktree_id")"
+  worktree="$(orca_worktree "$worktree_id")" || die "cannot read orca worktree list; no Mapping comment was posted"
   [ -n "$worktree" ] || die "worktree $worktree_id is not in orca worktree list"
   # Public comments carry the worktree identity key, never <repo-id>::<path>.
   worktree_key="$(json_get "$worktree" '.identity.key')"
