@@ -55,7 +55,7 @@ hub_id() { hub_get '.hub_id'; }
 hub_concurrency() { hub_get '.concurrency // 1'; }
 hub_repos() { hub_get '.repos[].name'; }
 # hub_folder_id: hub.json orca_worktree_id when the Hub is an Orca folder
-# workspace (folder:<uuid>); empty for a git Hub or when init-hub wrote none.
+# workspace (folder:<uuid>); empty for a git-worktree Hub folder or when init-hub wrote none.
 hub_folder_id() { hub_get '.orca_worktree_id | strings | select(startswith("folder:"))'; }
 
 # hub_repo <owner/repo>: the repos[] entry as compact JSON, empty if absent.

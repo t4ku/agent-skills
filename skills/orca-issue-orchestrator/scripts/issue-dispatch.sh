@@ -5,7 +5,7 @@
 #   issue-dispatch.sh <owner/repo> <n> [--apply] [--force] [--hub <hub-dir>]
 #   Checks the Issue (open, unassigned), the concurrency limit, and the bound
 #   Run; then claims the Issue (assign @me) and creates the Task with the Spec.
-#   It prints, and never runs, the placement: in a git Hub one worker-start
+#   It prints, and never runs, the placement: in a Hub folder that is a git worktree, one worker-start
 #   --worktree new-top-level plus worktree set; in a folder-workspace Hub
 #   (hub.json orca_worktree_id folder:<uuid>) worktree create --issue under the
 #   Hub folder, then worker-start --worktree identity:<key>.
@@ -80,7 +80,7 @@ if [ -z "$base" ]; then
 fi
 
 # The Hub folder's Orca id when it is a folder workspace. worker-start
-# --worktree new-top-level refuses such a Hub with not_a_repo, so the Worker's
+# --worktree new-top-level refuses such a Hub folder with not_a_repo, so the Worker's
 # worktree is created under it first and worker-start reuses it.
 hub_folder="$(hub_folder_id)"
 
@@ -126,7 +126,8 @@ if [ -n "$receipt" ]; then
   r_first() { json_get "$receipt_json" "first(.. | objects | $1 | select(type == \"string\" and length > 0))"; }
 
   # A worktree create receipt (folder placement, first command): name the
-  # worker-start that reuses the new worktree.
+  # worker-start that reuses the new worktree. identity is an object; take a
+  # serialized one (JSON or the bare key) as well.
   created_key="$(json_get "$receipt_json" '.result.worktree.identity? |
     if type == "string" then (fromjson? // {key: .}) else . end | .key? | strings')"
   if [ -n "$created_key" ] && [ -z "$(r_first '.dispatchId?')" ]; then
@@ -137,14 +138,16 @@ if [ -n "$receipt" ]; then
     exit 0
   fi
 
-  receipt_error="$(json_get "$receipt_json" 'select(.ok == false) | .error | if type == "object" then .code else . end | strings')"
-  if [ "$receipt_error" = "not_a_repo" ]; then
+  # not_a_repo has been seen as {"ok":false,"error":"not_a_repo"}; take it as
+  # an error code or a failed stage too.
+  if printf '%s' "$receipt_json" | jq -e 'select(.ok == false) | [.. | objects | (.error?, .error?.code?, .failedStage?)
+      | strings] | index("not_a_repo")' > /dev/null 2>&1; then
     repo_selector="$(orca_repo_selector "$repo")" ||
       die "no Orca repo has gitRemoteIdentity.canonicalKey github.com/$repo; add the repo to Orca first"
     printf 'worker-start refused the placement with not_a_repo: the Hub folder is a folder workspace, not a\n'
     printf 'git worktree. Do not retry it. Create the worktree under the Hub folder (linked to the Issue),\n'
     printf 'then start the Worker on its identity.key from that receipt (run them yourself):\n\n'
-    print_folder_placement "<task_id>" "<identity_key>"
+    print_folder_placement "$(r_first '(.taskId? // .task_id?)' | grep . || echo '<task_id>')" "<identity_key>"
     [ -n "$hub_folder" ] ||
       printf '\nhub.json has no folder:<uuid> orca_worktree_id; rerun init-hub, or take the id from orca worktree ps --json.\n'
     printf '\nNo Mapping comment was posted.\n'
@@ -292,11 +295,9 @@ if [ "$APPLY" -eq 1 ]; then
 fi
 
 if [ -n "$hub_folder" ]; then
-  printf '\n# 3. Create the worktree under the Hub folder, linked to the Issue (run it yourself; this script never does)\n'
-  print_cmd orca worktree create --repo "$repo_selector" --name "$name" --base-branch "$base" --issue "$number" \
-    --setup skip --parent-worktree "$hub_folder" --json
-  printf '\n# 4. Start the Worker in it (identity.key from the receipt of step 3; run it yourself)\n'
-  print_worker_start_on "$task_id" "<identity_key>"
+  printf '\n# 3. Create the worktree under the Hub folder, linked to the Issue, then start the Worker in it\n'
+  printf '#    with the identity.key from the worktree create receipt (run them yourself; this script never does)\n'
+  print_folder_placement "$task_id" "<identity_key>"
 else
   printf '\n# 3. Start the Worker (run it yourself; this script never does)\n'
   print_cmd orca orchestration worker-start --task "$task_id" --worktree new-top-level --repo "$repo_selector" \

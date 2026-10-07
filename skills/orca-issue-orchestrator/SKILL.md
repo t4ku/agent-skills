@@ -48,7 +48,7 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 |--------|---------|
 | `scripts/init-hub` | Write the Guard, Orchestrator instructions, and `.orca-hub/hub.json` into an existing Hub folder |
 | `scripts/frontier.sh` | List open, unblocked, unassigned `ready-for-agent` Issues across the configured repos (read-only) |
-| `scripts/issue-dispatch.sh` | Two steps. Step 1: claim an Issue, create the Task, print the placement to run (`worker-start` + `worktree set`, or on a folder-workspace Hub `worktree create --issue` + `worker-start --worktree identity:`). Step 2 (`--receipt`): from the `worker-start` receipt, post the Mapping comment |
+| `scripts/issue-dispatch.sh` | Two steps. Step 1: claim an Issue, create the Task, print the placement to run (`worker-start` + `worktree set`, or on a folder-workspace Hub folder `worktree create --issue` + `worker-start --worktree identity:`). Step 2 (`--receipt`): from the `worker-start` receipt, post the Mapping comment |
 | `scripts/issue-closeout.sh` | From the `worker_done`, post the success or failure comment; on failure add `needs-info` and unassign; print `worker-release` |
 | `scripts/issue-audit.sh` | List in-flight Issues whose PR is merged but which are still open; `--apply` comments a close-it-by-hand notice |
 | `scripts/issue-recover.sh` | After an Orca restart: read the latest Mapping block per in-flight Issue, reconcile with Orca, print (`--apply`: run) `run-use` |

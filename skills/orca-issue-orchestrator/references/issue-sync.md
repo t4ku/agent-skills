@@ -15,14 +15,14 @@ The whole procedure, one Issue at a time. Each step names its script; the sectio
    <skill-dir>/scripts/frontier.sh
    ```
 
-2. **Claim and create the Task** ([step 1](#step-1-claim-and-create-the-task)): preview, then apply. It prints the placement to run and runs none of it: in a git Hub one `worker-start --worktree new-top-level` plus `worktree set`; in a folder-workspace Hub (`hub.json` `orca_worktree_id` is `folder:<uuid>`) `worktree create --issue 123 --parent-worktree folder:<uuid>`, then `worker-start --worktree identity:<key>` (see [Two placements](#two-placements)).
+2. **Claim and create the Task** ([step 1](#step-1-claim-and-create-the-task)): preview, then apply. It prints the placement to run and runs none of it: in a Hub folder that is a git worktree, one `worker-start --worktree new-top-level` plus `worktree set`; in a folder-workspace Hub folder (`hub.json` `orca_worktree_id` is `folder:<uuid>`) `worktree create --issue 123 --parent-worktree folder:<uuid>`, then `worker-start --worktree identity:<key>` (see [Two placements](#two-placements)).
 
    ```sh
    <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123
    <skill-dir>/scripts/issue-dispatch.sh <owner>/<repo> 123 --apply
    ```
 
-3. **Start the Worker and post the Mapping comment** ([step 2](#step-2-start-the-worker-link-the-worktree-post-the-mapping-comment)): run the printed placement and pipe the `worker-start` receipt into step 2, then run the `orca worktree set` it prints (a git Hub only; a folder Hub's `worktree create --issue` already linked it).
+3. **Start the Worker and post the Mapping comment** ([step 2](#step-2-start-the-worker-link-the-worktree-post-the-mapping-comment)): run the printed placement and pipe the `worker-start` receipt into step 2, then run the `orca worktree set` it prints (a git-worktree Hub folder only; a folder-workspace Hub folder's `worktree create --issue` already linked it).
 
    ```sh
    orca orchestration worker-start --task <task_id> ... --json \
@@ -117,7 +117,7 @@ With `--apply` it then, in this order:
 
 Which commands step 1 prints depends on what the Hub folder is in Orca, read from `hub.json` `orca_worktree_id` (written by `init-hub`):
 
-- **Git Hub** (the Hub is a git worktree; `orca_worktree_id` is `<repo-id>::<path>` or absent): one `worker-start` creates a top-level worktree, then `worktree set` links it to the Issue.
+- **Hub folder that is a git worktree** ( `orca_worktree_id` is `<repo-id>::<path>` or absent): one `worker-start` creates a top-level worktree, then `worktree set` links it to the Issue.
 
   ```sh
   orca orchestration worker-start --task <task_id> --worktree new-top-level --repo id:<repo-id> \
@@ -125,7 +125,7 @@ Which commands step 1 prints depends on what the Hub folder is in Orca, read fro
   orca worktree set --worktree id:<worktree_id> --issue 123 --json
   ```
 
-- **Folder Hub** (an Orca folder workspace; `orca_worktree_id` is `folder:<uuid>`): `worker-start --worktree new-top-level` refuses it with `{"ok":false,"error":"not_a_repo"}`, even with a valid `--repo`. Create the worktree first, under the Hub folder and linked to the Issue, then start the Worker on it by its `identity.key` from the `worktree create` receipt (`result.worktree.identity.key`). The `--parent-worktree` lineage places the Worker's worktree under the Hub in Orca's sidebar, and `--issue` replaces `worktree set`.
+- **Folder-workspace Hub folder** ( `orca_worktree_id` is `folder:<uuid>`): `worker-start --worktree new-top-level` refuses it with `{"ok":false,"error":"not_a_repo"}`, even with a valid `--repo`. Create the worktree first, under the Hub folder and linked to the Issue, then start the Worker on it by its `identity.key` from the `worktree create` receipt (`result.worktree.identity.key`). The `--parent-worktree` lineage places the Worker's worktree under the Hub in Orca's sidebar, and `--issue` replaces `worktree set`.
 
   ```sh
   orca worktree create --repo id:<repo-id> --name issue-123-<slug> --base-branch <base> --issue 123 \
@@ -162,7 +162,7 @@ orca orchestration worker-start --task <task_id> ... --json \
     --worktree id:<worktree_id> --timeout-ms 300000 --json
   ```
 
-- `{"ok":false,"error":"not_a_repo"}`: `worker-start --worktree new-top-level` ran from a folder-workspace Hub. Do not retry it; run the printed folder placement (`worktree create ... --parent-worktree folder:<uuid>`, then `worker-start --worktree identity:<key>`) and feed that `worker-start` receipt to step 2.
+- `{"ok":false,"error":"not_a_repo"}`: `worker-start --worktree new-top-level` ran from a folder-workspace Hub folder. Do not retry it; run the printed folder placement (`worktree create ... --parent-worktree folder:<uuid>`, then `worker-start --worktree identity:<key>`) and feed that `worker-start` receipt to step 2.
 - Any other failed stage: do not relaunch. Follow the receipt's recovery commands and `references/recovery-and-cleanup.md` in `orca skills get orchestration --full`.
 
 ## Spec template
