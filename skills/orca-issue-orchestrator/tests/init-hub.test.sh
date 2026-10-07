@@ -40,13 +40,28 @@ echo '{}' > "$FAKE_HOME/.orca/state.json"
 
 # The fake orca: `repo list --json` reports every folder listed in
 # $WORK/orca-folders (one path per line) as an Orca folder workspace.
+# `worktree ps --json` answers the recorded fixture plus, for every folder
+# listed in $WORK/app-folders, a copy of its folder-workspace row (a Hub folder
+# created in the Orca app) with that path. A file $WORK/<subcommand>.fail
+# makes that call fail.
 BIN="$WORK/bin"
 mkdir -p "$BIN"
 cat > "$BIN/orca" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$ORCA_LOG"
+if [ -e "$ORCA_STATE/$2.fail" ]; then
+  echo "fake orca: $1 $2 set to fail" >&2
+  exit 1
+fi
 if [ "$1 $2" = "repo list" ]; then
   jq -R -s -c '{ok: true, result: {repos: [split("\n")[] | select(. != "") | {id: ("id-" + .), path: ., kind: "folder", displayName: "hub"}]}}' "$ORCA_FOLDERS"
+  exit 0
+fi
+if [ "$1 $2" = "worktree ps" ]; then
+  jq -c --arg folders "$(cat "$ORCA_APP_FOLDERS")" '
+    (.result.worktrees | map(select(.workspaceKind == "folder-workspace")) | first) as $t
+    | .result.worktrees += [$folders | split("\n")[] | select(. != "") | $t + {path: .}]
+  ' "$ORCA_PS_FIXTURE"
   exit 0
 fi
 echo "fake orca: unexpected call: $*" >&2
@@ -55,8 +70,14 @@ EOF
 chmod +x "$BIN/orca"
 export ORCA_LOG="$WORK/orca.log"
 export ORCA_FOLDERS="$WORK/orca-folders"
+export ORCA_APP_FOLDERS="$WORK/app-folders"
+export ORCA_PS_FIXTURE="$SCRIPT_DIR/fixtures/orca-worktree-ps.json"
+export ORCA_STATE="$WORK"
 : > "$ORCA_LOG"
 : > "$ORCA_FOLDERS"
+: > "$ORCA_APP_FOLDERS"
+PS_ID="$(jq -r '.result.worktrees[] | select(.workspaceKind == "folder-workspace") | .worktreeId' "$ORCA_PS_FIXTURE")"
+PS_NAME="$(jq -r '.result.worktrees[] | select(.workspaceKind == "folder-workspace") | .displayName' "$ORCA_PS_FIXTURE")"
 
 # new_hub <name>: create an empty Hub folder registered with the fake orca.
 new_hub() {
@@ -161,6 +182,7 @@ H="$HUB/.orca-hub/hub.json"
 check "hub.json hub_path is the Hub folder" jq -e --arg h "$HUB" '.hub_path == $h' "$H"
 check "hub.json has hub_id, concurrency, repos, bash_allow" \
   jq -e '(.hub_id | type == "string" and length > 0) and .concurrency == 1 and (.repos | type == "array") and (.bash_allow | type == "array")' "$H"
+check "a repo list folder records no Orca worktree id" jq -e 'has("orca_worktree_id") or has("orca_display_name") | not' "$H"
 
 G="$HUB/.orca-hub/guard.sh"
 check "guard.sh is a copy, not a symlink" [ ! -L "$G" ]
@@ -264,6 +286,42 @@ HUB4="$(new_hub dotted.hub)"
 run_init "$HUB4"
 check "a dotted path prints the CODEX_HOME alternative" contains "$OUT" "CODEX_HOME=$HUB4/.codex-home"
 
+# --- a Hub folder created in the Orca app (worktree ps) ---------------------------
+
+mkdir -p "$WORK/app-hub"
+APP="$WORK/app-hub"
+printf '%s\n' "$APP" >> "$ORCA_APP_FOLDERS"
+run_init "$APP" --apply
+check "a folder-workspace row in worktree ps is accepted" [ "$CODE" -eq 0 ]
+HA="$APP/.orca-hub/hub.json"
+check "app folder: hub.json hub_path is the Hub folder" jq -e --arg h "$APP" '.hub_path == $h' "$HA"
+check "app folder: hub.json records orca_worktree_id" jq -e --arg id "$PS_ID" '.orca_worktree_id == $id' "$HA"
+check "app folder: hub.json records orca_display_name" jq -e --arg n "$PS_NAME" '.orca_display_name == $n' "$HA"
+check "app folder: the Guard hook points into the Hub folder" \
+  jq -e --arg g "$APP/.orca-hub/guard.sh" 'any(.hooks.PreToolUse[]; any(.hooks[]; .command | contains($g)))' "$APP/.claude/settings.json"
+run_init "$APP" --apply
+check "app folder: second apply reports no changes" contains "$OUT" "No changes"
+
+ln -s "$APP" "$WORK/app-link"
+run_init "$WORK/app-link"
+check "app folder through a symlink is matched by realpath" [ "$CODE" -eq 0 ]
+check "app folder through a symlink plans for the path Orca holds" contains "$OUT" "plan for $APP (dry-run)"
+
+touch "$WORK/list.fail"
+run_init "$APP"
+check "app folder is accepted when orca repo list fails" [ "$CODE" -eq 0 ]
+rm -f "$WORK/list.fail"
+
+HUB6="$(new_hub both-fail)"
+touch "$WORK/ps.fail"
+run_init "$HUB6"
+check "a repo list folder does not need worktree ps" [ "$CODE" -eq 0 ]
+touch "$WORK/list.fail"
+run_init "$HUB6"
+check "both sources failing exits non-zero" [ "$CODE" -ne 0 ]
+check "both sources failing says Orca may not be running" contains "$OUT" "is Orca running?"
+rm -f "$WORK/list.fail" "$WORK/ps.fail"
+
 # --- not an Orca folder workspace ------------------------------------------------
 
 mkdir -p "$WORK/unregistered"
@@ -272,6 +330,7 @@ check "an unregistered folder exits non-zero" [ "$CODE" -ne 0 ]
 check "an unregistered folder prints the setup command" \
   contains "$OUT" "orca project setup-existing-folder"
 check "the setup command uses --kind folder" contains "$OUT" "--kind folder"
+check "the refusal names both sources" sh -c 'printf "%s" "$1" | grep -q "orca repo list" && printf "%s" "$1" | grep -q "orca worktree ps"' _ "$OUT"
 check "an unregistered folder gets no files" [ -z "$(ls -A "$WORK/unregistered")" ]
 
 run_init "$WORK/missing"
@@ -285,7 +344,7 @@ check "no arguments exits non-zero with usage" sh -c '[ "$1" -ne 0 ] && printf "
 # --- nothing outside the Hub folder ------------------------------------------------
 
 check "nothing under the fake HOME changed" [ "$(snapshot "$FAKE_HOME")" = "$home_before" ]
-check "orca was only asked to list repos" sh -c '! grep -v "^repo list --json$" "$1"' _ "$ORCA_LOG"
+check "orca was only asked to list repos and worktrees" sh -c '! grep -v -e "^repo list --json$" -e "^worktree ps --json$" "$1"' _ "$ORCA_LOG"
 
 # --- summary ------------------------------------------------------------------
 
