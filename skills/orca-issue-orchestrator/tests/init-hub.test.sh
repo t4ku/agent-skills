@@ -323,6 +323,21 @@ check "update: exactly one backup, holding the outdated file" \
 before="$(snapshot "$HUB7")"
 run_init "$HUB7" --apply
 check "update: second apply leaves the file byte-identical" [ "$(snapshot "$HUB7")" = "$before" ]
+rm -f "$HUB7"/AGENTS.md.bak.*
+sed 's/Never edit code/Old wording: never edit code/' "$HUB7/AGENTS.md" > "$WORK/a.md"
+cat "$WORK/a.md" > "$HUB7/AGENTS.md"
+run_init "$HUB7" --apply
+check "update: AGENTS.md reports update block" contains "$OUT" "update block AGENTS.md"
+check "update: AGENTS.md keeps the text before the block" starts_with "$HUB7/AGENTS.md" "$WORK/agents.orig"
+check "update: the AGENTS.md block is current again" [ "$(block_of "$HUB7/AGENTS.md")" = "$REF_BLOCK" ]
+check "update: exactly one backup of AGENTS.md, holding the outdated file" \
+  sh -c 'orig="$2"; set -- "$1"/AGENTS.md.bak.*; [ $# -eq 1 ] && cmp -s "$1" "$orig"' _ "$HUB7" "$WORK/a.md"
+
+HUB12="$(new_hub legacy)"
+printf '# Hub folder\n\nThis is the Hub folder of the orca-issue-orchestrator skill. Old text.\n' > "$HUB12/CLAUDE.md"
+run_init "$HUB12"
+check "an unmarked text from an older init-hub gets a note" contains "$OUT" "Note: CLAUDE.md already holds the instructions an older init-hub wrote"
+check "no note for an AGENTS.md that is created" sh -c '! printf "%s" "$1" | grep -q "Note: AGENTS.md"' _ "$OUT"
 
 HUB8="$(new_hub badmarkers)"
 printf '# Guide\n%s\nno end marker\n' "$START" > "$HUB8/CLAUDE.md"
@@ -336,6 +351,41 @@ before="$(snapshot "$HUB8")"
 run_init "$HUB8" --apply
 check "two blocks stop init-hub" [ "$CODE" -ne 0 ]
 check "two blocks leave the Hub folder untouched" [ "$(snapshot "$HUB8")" = "$before" ]
+printf '%s\n%s\n' "$END" "$START" > "$HUB8/CLAUDE.md"
+run_init "$HUB8" --apply
+check "an end marker before the start stops init-hub" [ "$CODE" -ne 0 ]
+
+HUB9="$(new_hub fenced)"
+printf '# Guide\n\n```markdown\n%s\nexample\n%s\n```\n' "$START" "$END" > "$HUB9/CLAUDE.md"
+cp "$HUB9/CLAUDE.md" "$WORK/fenced.orig"
+run_init "$HUB9" --apply
+check "markers inside a code fence are not the block" contains "$OUT" "append block CLAUDE.md"
+check "fenced markers: the example is kept" starts_with "$HUB9/CLAUDE.md" "$WORK/fenced.orig"
+check "fenced markers: the block is appended" \
+  sh -c '[ "$(grep -c -x -F -e "$2" "$1")" -eq 2 ] && [ "$(tail -n 1 "$1")" = "$3" ]' _ "$HUB9/CLAUDE.md" "$START" "$END"
+run_init "$HUB9" --apply
+check "fenced markers: second apply reports no changes" contains "$OUT" "No changes"
+
+HUB10="$(new_hub linked)"
+printf '# Guide\n\nShared text.\n' > "$HUB10/CLAUDE.md"
+ln -s CLAUDE.md "$HUB10/AGENTS.md"
+run_init "$HUB10" --apply
+check "symlinked AGENTS.md: apply exits 0" [ "$CODE" -eq 0 ]
+check "symlinked AGENTS.md is merged, not replaced" contains "$OUT" "append block AGENTS.md"
+check "symlinked AGENTS.md stays a symlink" [ -L "$HUB10/AGENTS.md" ]
+check "symlinked AGENTS.md: CLAUDE.md keeps its text" grep -qx 'Shared text.' "$HUB10/CLAUDE.md"
+check "symlinked AGENTS.md: one block in CLAUDE.md" [ "$(count_lines "$HUB10/CLAUDE.md" "$START")" -eq 1 ]
+before="$(snapshot "$HUB10")"
+run_init "$HUB10" --apply
+check "symlinked AGENTS.md: second apply reports no changes" contains "$OUT" "No changes"
+check "symlinked AGENTS.md: second apply changes nothing" [ "$(snapshot "$HUB10")" = "$before" ]
+
+HUB11="$(new_hub linked-out)"
+printf 'outside\n' > "$WORK/outside.md"
+ln -s "$WORK/outside.md" "$HUB11/CLAUDE.md"
+run_init "$HUB11" --apply
+check "a CLAUDE.md symlink out of the Hub folder stops init-hub" [ "$CODE" -ne 0 ]
+check "the file outside the Hub folder is untouched" [ "$(cat "$WORK/outside.md")" = outside ]
 
 # --- hub.json from arguments, kept on re-run -------------------------------------
 

@@ -28,7 +28,7 @@ Every byte outside the markers is the folder's own and is kept, so an existing m
 | `update block` | the markers exist but the lines between them differ from the current text | yes |
 | `keep` | the block is current; the file is not touched | no |
 
-Edits between the markers are replaced on the next `--apply`; put your own text outside them. A file with more than one marker of a kind, or an end before the start, stops `init-hub` before anything is written. A Hub folder initialised before the block existed has the old five-line text without markers; after the `append block` run, delete those lines by hand.
+Edits between the markers are replaced on the next `--apply`; put your own text outside them. A file with more than one marker of a kind, a marker without its partner, or an end before the start stops `init-hub` before anything is written. Marker lines inside a ``` or ~~~ fence are examples and are ignored. A symlink to a file inside the Hub folder (for example `AGENTS.md -> CLAUDE.md`) is merged and written through, so it stays a link; a symlink out of the Hub folder stops `init-hub`. The block is written with LF line endings. A Hub folder initialised before the block existed has the old five-line text without markers; the plan prints a note, and after the `append block` run you delete those lines by hand.
 
 ## What the Guard allows and denies (Claude Code)
 
