@@ -344,6 +344,117 @@ check "other failure: names the failed stage" out_has "placement"
 check "other failure: prints no retry" out_lacks "--retry-of"
 check "other failure: posts no comment" no_mutation
 
+# --- issue-dispatch.sh: a folder-workspace Hub folder----------------------------------
+
+# folder_hub: hub.json as init-hub writes it on a folder-workspace Hub folder. Undo
+# with git_hub.
+cp "$HUB/.orca-hub/hub.json" "$WORK/hub.json.git"
+folder_hub() {
+  jq '.orca_worktree_id = "folder:hub-folder-id" | .orca_display_name = "example-hub"' \
+    "$WORK/hub.json.git" > "$HUB/.orca-hub/hub.json"
+}
+git_hub() { cp "$WORK/hub.json.git" "$HUB/.orca-hub/hub.json"; }
+
+WT_CREATE_DRY='orca worktree create --repo id:repo-app-id --name issue-7-add-login-page --base-branch main --issue 7 --setup skip --parent-worktree folder:hub-folder-id --json'
+WORKER_START_ID_DRY='orca orchestration worker-start --task <task_id> --worktree identity:<identity_key> --agent claude --timeout-ms 300000 --json'
+
+reset_fakes
+folder_hub
+run "$DISPATCH" example/app 7 --hub "$HUB"
+check "folder dry-run: exits 0" code_is 0
+check "folder dry-run: prints worktree create under the Hub folder, linked to the Issue" out_has_line "$WT_CREATE_DRY"
+check "folder dry-run: prints worker-start on the created worktree's identity" out_has_line "$WORKER_START_ID_DRY"
+check "folder dry-run: no new-top-level worker-start" out_lacks "new-top-level"
+check "folder dry-run: no separate worktree set --issue" out_lacks "orca worktree set"
+check "folder dry-run: prints the comment" out_has_line "$COMMENT"
+folder_in_order() {
+  local a b c d
+  a="$(line_no "$CLAIM")"; b="$(line_no "$WT_CREATE_DRY")"; c="$(line_no "$WORKER_START_ID_DRY")"; d="$(line_no "$COMMENT")"
+  [ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ -n "$d" ] &&
+    [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] && [ "$c" -lt "$d" ]
+}
+check "folder dry-run: claim, worktree create, worker-start, comment in that order" folder_in_order
+check "folder dry-run: the shims log no mutation" no_mutation
+
+reset_fakes
+run "$DISPATCH" example/app 7 --hub "$HUB" --apply
+check "folder apply: exits 0" code_is 0
+check "folder apply: worktree create is never invoked" not_called "orca worktree create"
+check "folder apply: worker-start is never invoked" not_called "orca orchestration worker-start"
+check "folder apply: prints worker-start for the created Task" \
+  out_has_line 'orca orchestration worker-start --task task_test1 --worktree identity:<identity_key> --agent claude --timeout-ms 300000 --json'
+
+reset_fakes
+jq '.orca_worktree_id = "repo-hub-id::/path/to/hub"' "$WORK/hub.json.git" > "$HUB/.orca-hub/hub.json"
+run "$DISPATCH" example/app 7 --hub "$HUB"
+check "git-worktree Hub folder with an orca_worktree_id: keeps the new-top-level worker-start" out_has_line "$WORKER_START_DRY"
+check "git-worktree Hub folder with an orca_worktree_id: keeps the worktree set" out_has_line "$WORKTREE_SET_DRY"
+check "git-worktree Hub folder with an orca_worktree_id: no worktree create" out_lacks "orca worktree create"
+
+# The worktree create receipt: the script names the worker-start to run next.
+reset_fakes
+folder_hub
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-worktree-create.json" --apply
+check "worktree create receipt: exits 0" code_is 0
+check "worktree create receipt: prints worker-start on the new identity" \
+  out_has_line 'orca orchestration worker-start --task <task_id> --worktree identity:wt2:local:inst-7f --agent claude --timeout-ms 300000 --json'
+check "worktree create receipt: posts nothing" no_mutation
+
+# The worker-start receipt of the folder path: its worktree effect is `reused`.
+reset_fakes
+folder_hub
+run_stdin "$FIXTURES/receipt-reused.json" "$DISPATCH" example/app 7 --hub "$HUB" --receipt - --apply
+check "reused receipt: exits 0" code_is 0
+check "reused receipt: posts the Mapping comment" called "gh issue comment 7"
+check "reused receipt: prints no worktree set (worktree create linked the Issue)" out_lacks "orca worktree set"
+reused_block_is() {
+  mapping_block | jq -e '. == {
+    v: 1, repo: "example/app", issue: 7, run_id: "run_test1", task_id: "task_test1",
+    dispatch_id: "ctx_test3", worktree_id: "wt2:local:inst-7f", worktree: "issue-7-add-login-page",
+    branch: "issue-7-add-login-page", hub: "example-hub"
+  }' >/dev/null
+}
+check "reused receipt: the JSON block names the real worktree and branch" reused_block_is
+check "reused receipt: the comment has no absolute path" no_abs_path "$FAKE_LOG.comment"
+check "reused receipt: the human line names the worktree and branch" \
+  grep -qxF -- '- Worktree: `issue-7-add-login-page` (branch `issue-7-add-login-page`, base `main`)' "$FAKE_LOG.comment"
+
+reset_fakes
+folder_hub
+jq '.result.worker |= (del(.worktreeId) | .effects[0].id = "wt2:local:inst-7f")' "$FIXTURES/receipt-reused.json" > "$WORK/receipt-reused-key.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$WORK/receipt-reused-key.json" --apply
+check "reused receipt naming the identity key: posts the Mapping comment" called "gh issue comment 7"
+check "reused receipt naming the identity key: the block has the key" \
+  bash -c 'sed -n "s/^<!-- orca-issue-orchestrator \(.*\) -->\$/\1/p" "$FAKE_LOG.comment" | jq -e ".worktree_id == \"wt2:local:inst-7f\"" >/dev/null'
+
+# worker-start new-top-level from a folder-workspace Hub folder: not_a_repo.
+reset_fakes
+folder_hub
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-not-a-repo.json" --apply
+check "not_a_repo: exits 3" code_is 3
+check "not_a_repo: prints worktree create under the Hub folder" out_has_line "$WT_CREATE_DRY"
+check "not_a_repo: then worker-start on the identity" out_has_line "$WORKER_START_ID_DRY"
+check "not_a_repo: prints no retry" out_lacks "--retry-of"
+check "not_a_repo: prints no new-top-level" out_lacks "new-top-level"
+check "not_a_repo: posts nothing" no_mutation
+
+reset_fakes
+echo '{"ok": false, "result": {"worker": {"taskId": "task_test1", "state": "failed", "failedStage": "not_a_repo", "effects": [], "residualResources": []}}}' \
+  > "$WORK/receipt-not-a-repo-stage.json"
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$WORK/receipt-not-a-repo-stage.json" --apply
+check "not_a_repo as a failed stage: exits 3" code_is 3
+check "not_a_repo as a failed stage: prints worker-start for the receipt's Task" \
+  out_has_line 'orca orchestration worker-start --task task_test1 --worktree identity:<identity_key> --agent claude --timeout-ms 300000 --json'
+check "not_a_repo as a failed stage: prints no retry" out_lacks "--retry-of"
+git_hub
+
+reset_fakes
+run "$DISPATCH" example/app 7 --hub "$HUB" --receipt "$FIXTURES/receipt-not-a-repo.json" --apply
+check "not_a_repo, git-worktree Hub folder: exits 3" code_is 3
+check "not_a_repo, git-worktree Hub folder: still names the two-command placement" \
+  out_has_line 'orca worktree create --repo id:repo-app-id --name issue-7-add-login-page --base-branch main --issue 7 --setup skip --parent-worktree folder:<hub_folder_id> --json'
+check "not_a_repo, git-worktree Hub folder: posts nothing" no_mutation
+
 # --- summary ------------------------------------------------------------------
 
 summary

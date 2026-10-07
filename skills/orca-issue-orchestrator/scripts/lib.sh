@@ -54,6 +54,9 @@ hub_get() {
 hub_id() { hub_get '.hub_id'; }
 hub_concurrency() { hub_get '.concurrency // 1'; }
 hub_repos() { hub_get '.repos[].name'; }
+# hub_folder_id: hub.json orca_worktree_id when the Hub is an Orca folder
+# workspace (folder:<uuid>); empty for a git-worktree Hub folder or when init-hub wrote none.
+hub_folder_id() { hub_get '.orca_worktree_id | strings | select(startswith("folder:"))'; }
 
 # hub_repo <owner/repo>: the repos[] entry as compact JSON, empty if absent.
 hub_repo() {
@@ -423,12 +426,12 @@ orca_worktrees() {
   }
 }
 
-# orca_worktree <worktree-id>: the worktree list row as compact JSON, empty if
-# absent. Returns 1 as orca_worktrees does.
+# orca_worktree <worktree-id | identity key>: the worktree list row as compact
+# JSON, empty if absent. Returns 1 as orca_worktrees does.
 orca_worktree() {
   local wts
   wts="$(orca_worktrees)" || return 1
-  printf '%s' "$wts" | jq -c --arg id "$1" 'first(.[] | select(.id == $id)) // empty'
+  printf '%s' "$wts" | jq -c --arg id "$1" 'first(.[] | select(.id == $id or .identity.key? == $id)) // empty'
 }
 
 # orca_workers <run-id>: every worker-list row of the Run as one JSON array,
