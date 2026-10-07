@@ -7,7 +7,28 @@ What stops the Orchestrator from editing code. `scripts/init-hub.sh` writes ever
 | Hard stop on edits | PreToolUse hook `.orca-hub/guard.sh` | `--sandbox read-only -a never` |
 | Command allowlist | the same hook (Bash) | `.codex/rules/orchestrator.rules` (execpolicy) |
 | Destructive-command safety net | `permissions.deny` in `.claude/settings.json` | `forbidden` rules in the same `.rules` file |
-| Instructions | `CLAUDE.md`, optional `.claude/agents/orchestrator.md` | `AGENTS.md` (same text as `CLAUDE.md`) |
+| Instructions | the Orchestrator block in `CLAUDE.md`, optional `.claude/agents/orchestrator.md` | the same block in `AGENTS.md` |
+
+### The Orchestrator block in CLAUDE.md and AGENTS.md
+
+`init-hub` writes the Orchestrator instructions (the role, a pointer to `/orca-issue-orchestrator`, where notes go, never edit code) between two marker lines:
+
+```markdown
+<!-- orca-issue-orchestrator:start -->
+...
+<!-- orca-issue-orchestrator:end -->
+```
+
+Every byte outside the markers is the folder's own and is kept, so an existing multi-project guide stays in force for every session in the Hub folder. The plan reports, per file:
+
+| Action | When | Backup |
+|--------|------|--------|
+| `create` | the file does not exist; it gets a `# Hub folder` heading and the block | no |
+| `append block` | the file exists without markers; the block is appended after one blank line | yes |
+| `update block` | the markers exist but the lines between them differ from the current text | yes |
+| `keep` | the block is current; the file is not touched | no |
+
+Edits between the markers are replaced on the next `--apply`; put your own text outside them. A file with more than one marker of a kind, a marker without its partner, or an end before the start stops `init-hub` before anything is written. Marker lines inside a ``` or ~~~ fence are examples and are ignored. A symlink to a file inside the Hub folder (for example `AGENTS.md -> CLAUDE.md`) is merged and written through, so it stays a link; a symlink out of the Hub folder stops `init-hub`. The block is written with LF line endings. A Hub folder initialised before the block existed has the old five-line text without markers; the plan prints a note, and after the `append block` run you delete those lines by hand.
 
 ## What the Guard allows and denies (Claude Code)
 

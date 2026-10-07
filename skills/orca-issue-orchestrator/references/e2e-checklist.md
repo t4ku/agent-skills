@@ -44,7 +44,7 @@ How to use it:
   <skill-dir>/scripts/init-hub.sh <hub-dir> --hub-id <hub_id> --repo <owner>/<repo>
   ```
 
-  **Proves it:** a plan with the line `Dry-run: nothing written. Re-run with --apply to write <n> change(s).` that lists `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.claude/agents/orchestrator.md`, `.codex/config.toml`, `.codex/rules/orchestrator.rules`, `.orca-hub/hub.json`, `.orca-hub/guard.sh`, and `docs/`, `research/`, `tmp/`; nothing in `<hub-dir>` changed.
+  **Proves it:** a plan with the line `Dry-run: nothing written. Re-run with --apply to write <n> change(s).` that lists `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.claude/agents/orchestrator.md`, `.codex/config.toml`, `.codex/rules/orchestrator.rules`, `.orca-hub/hub.json`, `.orca-hub/guard.sh`, and `docs/`, `research/`, `tmp/`; an existing `CLAUDE.md` / `AGENTS.md` shows `append block` (or `update block` / `keep`), never `update`; nothing in `<hub-dir>` changed.
 
 - [ ] Apply: the same command with `--apply`, then run it once more with `--apply`.
 
