@@ -48,7 +48,7 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 |--------|---------|
 | `scripts/init-hub` | Write the Guard, Orchestrator instructions, and `.orca-hub/hub.json` into an existing Hub folder |
 | `scripts/frontier.sh` | List open, unblocked, unassigned `ready-for-agent` Issues across the configured repos (read-only) |
-| `scripts/issue-dispatch.sh` | Two steps. Step 1: claim an Issue, create the Task, print the placement to run (`worker-start` + `worktree set`, or on a folder-workspace Hub folder `worktree create --issue` + `worker-start --worktree identity:`). Step 2 (`--receipt`): from the `worker-start` receipt, post the Mapping comment |
+| `scripts/issue-dispatch.sh` | Two steps. Step 1: claim an Issue, create the Task, print the placement to run (`worker-start --worktree new-top-level --repo` + `worktree set`, for every kind of Hub folder). Step 2 (`--receipt`): from the `worker-start` receipt, post the Mapping comment |
 | `scripts/issue-closeout.sh` | From the `worker_done`, post the success or failure comment; on failure add `needs-info` and unassign; print `worker-release` |
 | `scripts/issue-audit.sh` | List in-flight Issues whose PR is merged but which are still open; `--apply` comments a close-it-by-hand notice |
 | `scripts/issue-recover.sh` | After an Orca restart: read the latest Mapping block per in-flight Issue, reconcile with Orca, print (`--apply`: run) `run-use` |
@@ -56,13 +56,19 @@ All scripts print what they would do by default and act only with `--apply`. Pre
 
 ## Initialise a Hub folder
 
-1. The Hub folder must already be an Orca folder workspace (`orca repo list --json` kind `folder`, or an `orca worktree ps --json` row with `workspaceKind: "folder-workspace"`, as for a folder created in the Orca app). If it is not, `init-hub` prints the `orca project setup-existing-folder --kind folder` command and stops.
+1. The Hub folder must already be known to Orca: a folder workspace (`orca repo list --json` kind `folder`, or an `orca worktree ps --json` row with `workspaceKind: "folder-workspace"`, as for a folder created in the Orca app), or a git repo of its own added with `orca repo add`. If it is not, `init-hub` prints the `orca project setup-existing-folder --kind folder` command and stops. Put it beside the repos it supervises (for instance `~/hubs/<hub_id>/`), not above them; see [Where a Hub folder goes](#where-a-hub-folder-goes).
 2. Preview: `<skill-dir>/scripts/init-hub.sh <hub-dir>` (`<skill-dir>` is where this skill is installed) (optionally `--hub-id <id> --repo <owner>/<repo> --concurrency <n> --bash-allow <cmd>`). Read the plan — it lists every file it will write and every file it will back up.
-3. Apply: the same command with `--apply`. Changed files are backed up with a timestamp; `.claude/settings.json` and `hub.json` are merged, not replaced. An existing `CLAUDE.md` / `AGENTS.md` keeps its text and gains the Orchestrator block between `<!-- orca-issue-orchestrator:start -->` and `<!-- orca-issue-orchestrator:end -->` (`append block`, later `update block` or `keep`); only a missing file is created. A second run reports "No changes." Details: `references/guard.md`.
+3. Apply: the same command with `--apply`. Changed files are backed up with a timestamp; `.claude/settings.json` and `hub.json` are merged, not replaced. An existing `CLAUDE.md` / `AGENTS.md` keeps its text and gains the Orchestrator block between `<!-- orca-issue-orchestrator:start -->` and `<!-- orca-issue-orchestrator:end -->` (`append block`, later `update block` or `keep`); only a missing file is created. When the Hub folder contains a repo Orca knows, the block stays out of both files (`remove block` takes out one written before) and the Orchestrator starts with `claude --agent orchestrator`. A second run reports "No changes." Details: `references/guard.md`.
 4. Edit `<hub-dir>/.orca-hub/hub.json`: `hub_id`, `concurrency` (default 1), `repos[]` as `<owner>/<repo>` with optional `base_branch` and `constraints[]`, and `bash_allow[]`. Schema: `references/hub-json.md`. After changing `bash_allow[]`, re-run step 3 so the Codex rules follow.
 5. For Codex, start the Orchestrator with the launch command `init-hub` prints and check `/status` (see `references/guard.md`).
 
 Nothing under `~/.claude`, `~/.codex`, or `~/.orca` is touched.
+
+### Where a Hub folder goes
+
+- **Beside the repos, not above them.** Claude Code loads every ancestor's `CLAUDE.md` into a session, and Orca puts Worker worktrees inside their repo (`<repo>/.orca/worktrees/...`). A Hub folder above a repo would hand the Orchestrator instructions ("never edit code") to every Worker. If the Hub folder must stay at a project group's parent folder, `init-hub` keeps the instructions in `.claude/agents/orchestrator.md` only (see step 3).
+- **One per goal, side by side.** Several Hub folders may run at once, for instance `~/hubs/<a>/` and `~/hubs/<b>/`. Give each its own `hub_id` and repos that do not overlap: a claim is an assignment to `@me` and does not say which Hub folder made it. Put no `CLAUDE.md` in the folder that holds them, and do not nest one Hub folder in another.
+- **A git repo of its own is fine.** Do not `git init` inside a folder-workspace Hub folder: Orca turns it into a git project. Create the Hub folder as a git repo from the start, or keep it out of git.
 
 ## Typical requests
 
@@ -70,10 +76,10 @@ Each one is a stretch of **The loop** in `references/issue-sync.md`; follow it t
 
 - **"take #123"** — dispatch in two steps, then supervise:
   1. `issue-dispatch.sh <owner>/<repo> 123` (preview), then `--apply`: claims the Issue, creates the Task, and prints `worker-start` (it never runs it).
-  2. Run that `worker-start` and pipe its receipt into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`: it posts the Mapping comment and prints the exact `orca worktree set` to run (unless already linked), or, on `agent_readiness`, the retry `worker-start`, or, on `not_a_repo`, the folder placement.
-  3. Wait with `orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 570000 --json`; ignore heartbeats, repeat after an empty wait. Answer a Worker `ask` from the Issue and repo facts, else relay it to the human.
+  2. Run that `worker-start` and pipe its receipt into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`: it posts the Mapping comment and prints the exact `orca worktree set` to run (unless already linked), or, on `agent_readiness`, the retry `worker-start`, or, on `not_a_repo`, says to update Orca.
+  3. End your turn. Orca wakes you when a Worker sends `worker_done`, a question, or an escalation; never poll or loop on `check --wait`. On the wake, run `orca orchestration check --json` and handle the batch. Answer a Worker `ask` from the Issue and repo facts, else relay it to the human.
 - **"take the next one"** — run `frontier.sh`, pick the first Issue, then as above. Only when a human asks.
-- **A `worker_done` arrived** — pipe `orca orchestration check --json` into `issue-closeout.sh <owner>/<repo> 123 <succeeded|failed> -` (on failure add `--needs`), preview then `--apply`; run the printed `worker-release`; then `--ack` the delivery.
+- **A `worker_done` arrived** (Orca woke you) — pipe `orca orchestration check --json` into `issue-closeout.sh <owner>/<repo> 123 <succeeded|failed> -` (on failure add `--needs`), preview then `--apply`; run the printed `worker-release`; then `--ack` the delivery.
 - **PRs merged** — `issue-audit.sh`, then a human closes the Issues it lists.
 - **After an Orca restart** — `issue-recover.sh` (preview), then `--apply` to re-bind the Run; act on each Issue's reported state.
 
@@ -83,6 +89,7 @@ Each one is a stretch of **The loop** in `references/issue-sync.md`; follow it t
 - Every comment you post starts with `> *Posted by an AI orchestrator.*`
 - Never close an Issue, merge a PR, or push. Success is an open PR whose body starts with `Closes #123`. GitHub does not always close the Issue on merge; `issue-audit.sh` lists the ones left open for a human to close.
 - Never run `task-update --status completed`; a valid `worker_done` settles the Task.
+- Never run `orca orchestration reset`: it wipes the Runs of every Hub folder on this Orca. The Guard and `permissions.deny` refuse it.
 - No automatic retry after a failure.
 - Public comments carry the `hub_id`, never a local path.
 

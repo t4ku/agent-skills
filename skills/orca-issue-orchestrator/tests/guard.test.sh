@@ -161,6 +161,15 @@ expect_allow "Bash: frontier.sh by basename" "$(bash_json './frontier.sh')"
 expect_deny "Bash: skill script basename needs .sh" "$(bash_json '/usr/local/bin/issue-x')" '/usr/local/bin/issue-x'
 expect_allow "Bash: bash_allow[] from hub.json" "$(bash_json 'make docs')"
 
+expect_deny "Bash: orca orchestration reset (wipes every Hub's Runs)" "$(bash_json 'orca orchestration reset --all')" "orca orchestration reset"
+expect_deny "Bash: orca orchestration reset behind global options" \
+  "$(bash_json 'orca --environment local orchestration --json reset --tasks')" "orca orchestration reset"
+expect_deny "Bash: orca orchestration reset after &&" "$(bash_json 'ls && orca orchestration reset --messages')" "orca orchestration reset"
+expect_deny "Bash: orca orchestration subcommand that needs expansion" \
+  "$(bash_json 'orca orchestration $CMD --all')" 'orca orchestration $CMD'
+expect_allow "Bash: orca orchestration run-list" "$(bash_json 'orca orchestration run-list --json')"
+expect_allow "Bash: the word reset as a message body" \
+  "$(bash_json 'orca orchestration reply --id m1 --body reset')"
 expect_deny "Bash: command not on the allowlist" "$(bash_json 'rm -rf src')" rm
 expect_deny "Bash: git subcommand not allowed" "$(bash_json 'git commit -m x')" "git commit"
 expect_deny "Bash: git without a subcommand" "$(bash_json 'git')" "git"

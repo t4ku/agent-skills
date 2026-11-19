@@ -169,6 +169,28 @@ scan_word() {
   [ -z "$quote" ] && [ "$bad" -eq 0 ]
 }
 
+# check_orca <segment> <index>: deny `orca orchestration reset`. It wipes the
+# orchestration state of the whole Orca runtime, so one Hub would erase the
+# Runs of every other Hub on the machine. The subcommand is the first word
+# after `orchestration` that is not an option; one that needs expansion is
+# denied, since it could be reset.
+check_orca() {
+  local seg="$1" pos="$2" after=0 ok
+  while :; do
+    ok=0
+    scan_word "$seg" "$pos" && ok=1
+    [ -n "$word_raw" ] || return 0
+    pos=$word_end
+    if [ "$after" -eq 1 ]; then
+      case "$word" in -*) continue ;; esac
+      [ "$ok" -eq 1 ] || deny "orca orchestration $word_raw"
+      [ "$word" = reset ] && deny "orca orchestration reset"
+      return 0
+    fi
+    [ "$ok" -eq 1 ] && [ "$word" = orchestration ] && after=1
+  done
+}
+
 # check_segment <segment>: deny unless the segment may run.
 check_segment() {
   local seg="$1" first second
@@ -185,6 +207,7 @@ check_segment() {
     in_list "$second" "$ALLOWED_GIT" && return 0
     deny "git${second:+ $second}"
   fi
+  [ "$first" = orca ] && check_orca "$seg" "$word_end"
   in_list "$first" "$ALLOWED_COMMANDS" && return 0
   in_bash_allow "$first" && return 0
   # ${first##*/} rather than basename(1): $(...) would strip trailing newlines.

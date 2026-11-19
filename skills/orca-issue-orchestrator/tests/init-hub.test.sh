@@ -18,7 +18,7 @@ INIT="$SCRIPT_DIR/../scripts/init-hub.sh"
 GUARD_SRC="$SCRIPT_DIR/../scripts/guard.sh"
 
 REASON='Editing code is forbidden in the orchestrator. Create a Task with orca orchestration and delegate it (see /orca-issue-orchestrator).'
-DENIES='["Bash(rm -rf *)","Bash(git push *)","Bash(gh issue close *)","Bash(gh issue delete *)","Bash(gh pr merge *)","Bash(gh repo delete *)"]'
+DENIES='["Bash(rm -rf *)","Bash(git push *)","Bash(gh issue close *)","Bash(gh issue delete *)","Bash(gh pr merge *)","Bash(gh repo delete *)","Bash(orca orchestration reset *)"]'
 FILES='CLAUDE.md AGENTS.md .claude/settings.json .claude/agents/orchestrator.md .codex/config.toml .codex/rules/orchestrator.rules .orca-hub/hub.json .orca-hub/guard.sh'
 DIRS='docs research tmp'
 
@@ -39,7 +39,8 @@ echo 'model = "x"' > "$FAKE_HOME/.codex/config.toml"
 echo '{}' > "$FAKE_HOME/.orca/state.json"
 
 # The fake orca: `repo list --json` reports every folder listed in
-# $WORK/orca-folders (one path per line) as an Orca folder workspace.
+# $WORK/orca-folders (one path per line) as an Orca folder workspace, and
+# every path in $WORK/orca-git-repos as a git repo.
 # `worktree ps --json` answers the recorded fixture plus, for every folder
 # listed in $WORK/app-folders, a copy of its folder-workspace row (a Hub folder
 # created in the Orca app) with that path. A file $WORK/repo-list.fail or
@@ -54,7 +55,9 @@ if [ -e "$ORCA_STATE/$1-$2.fail" ]; then
   exit 1
 fi
 if [ "$1 $2" = "repo list" ]; then
-  jq -R -s -c '{ok: true, result: {repos: [split("\n")[] | select(. != "") | {id: ("id-" + .), path: ., kind: "folder", displayName: "hub"}]}}' "$ORCA_FOLDERS"
+  jq -n -c --rawfile f "$ORCA_FOLDERS" --rawfile g "$ORCA_GIT_REPOS" '{ok: true, result: {repos: (
+    [$f | split("\n")[] | select(. != "") | {id: ("id-" + .), path: ., kind: "folder", displayName: "hub"}]
+    + [$g | split("\n")[] | select(. != "") | {id: ("id-" + .), path: ., kind: "git", displayName: (split("/") | last)}])}}'
   exit 0
 fi
 if [ "$1 $2" = "worktree ps" ]; then
@@ -70,11 +73,13 @@ EOF
 chmod +x "$BIN/orca"
 export ORCA_LOG="$WORK/orca.log"
 export ORCA_FOLDERS="$WORK/orca-folders"
+export ORCA_GIT_REPOS="$WORK/orca-git-repos"
 export ORCA_APP_FOLDERS="$WORK/app-folders"
 export ORCA_PS_FIXTURE="$SCRIPT_DIR/fixtures/orca-worktree-ps.json"
 export ORCA_STATE="$WORK"
 : > "$ORCA_LOG"
 : > "$ORCA_FOLDERS"
+: > "$ORCA_GIT_REPOS"
 : > "$ORCA_APP_FOLDERS"
 PS_ID="$(jq -r '.result.worktrees[] | select(.workspaceKind == "folder-workspace") | .worktreeId' "$ORCA_PS_FIXTURE")"
 PS_NAME="$(jq -r '.result.worktrees[] | select(.workspaceKind == "folder-workspace") | .displayName' "$ORCA_PS_FIXTURE")"
@@ -145,7 +150,7 @@ check "settings.json is valid JSON" jq -e . "$S" >/dev/null
 check "settings.json registers the Guard as a PreToolUse hook for Bash|Edit|Write|NotebookEdit" \
   jq -e --arg g "$HUB/.orca-hub/guard.sh" \
   'any(.hooks.PreToolUse[]; .matcher == "Bash|Edit|Write|NotebookEdit" and any(.hooks[]; .type == "command" and (.command | contains($g))))' "$S"
-check "settings.json denies exactly the six destructive commands" \
+check "settings.json denies exactly the seven destructive commands" \
   jq -e --argjson d "$DENIES" '.permissions.deny == $d' "$S"
 check "settings.json never sets the agent key" jq -e 'has("agent") | not' "$S"
 
@@ -175,7 +180,7 @@ for w in $allowed_git; do
   check "rules allow git $w" grep -qF "prefix_rule(pattern = [\"git\", \"$w\"], decision = \"allow\")" "$R"
 done
 check "rules do not allow bare git" sh -c '! grep -qF "prefix_rule(pattern = [\"git\"]," "$1"' _ "$R"
-for p in "\"rm\", \"-rf\"" "\"git\", \"push\"" "\"gh\", \"issue\", \"close\"" "\"gh\", \"issue\", \"delete\"" "\"gh\", \"pr\", \"merge\"" "\"gh\", \"repo\", \"delete\""; do
+for p in "\"rm\", \"-rf\"" "\"git\", \"push\"" "\"gh\", \"issue\", \"close\"" "\"gh\", \"issue\", \"delete\"" "\"gh\", \"pr\", \"merge\"" "\"gh\", \"repo\", \"delete\"" "\"orca\", \"orchestration\", \"reset\""; do
   check "rules forbid [$p] (the permissions.deny list)" grep -qF "prefix_rule(pattern = [$p], decision = \"forbidden\")" "$R"
 done
 
@@ -241,8 +246,8 @@ check "merge adds the Guard hook" \
   jq -e --arg g "$HUB2/.orca-hub/guard.sh" 'any(.hooks.PreToolUse[]; any(.hooks[]; .command | contains($g)))' "$S2"
 check "merge keeps other hook events" jq -e '.hooks.Stop[0].hooks[0].command == "echo stop"' "$S2"
 check "merge keeps other keys" jq -e '.model == "opus" and .permissions.allow == ["Bash(ls *)"]' "$S2"
-check "merge keeps existing denies and adds the six without duplicates" \
-  jq -e --argjson d "$DENIES" '(.permissions.deny | index("Bash(curl *)")) != null and ($d - .permissions.deny) == [] and (.permissions.deny | length) == 7' "$S2"
+check "merge keeps existing denies and adds the seven without duplicates" \
+  jq -e --argjson d "$DENIES" '(.permissions.deny | index("Bash(curl *)")) != null and ($d - .permissions.deny) == [] and (.permissions.deny | length) == 8' "$S2"
 check "merge never sets the agent key" jq -e 'has("agent") | not' "$S2"
 backup="$(find "$HUB2/.claude" -name 'settings.json.bak.*' | head -1)"
 check "a timestamped backup of settings.json exists" [ -n "$backup" ]
@@ -470,6 +475,68 @@ run_init "$HUB6"
 check "both sources failing exits non-zero" [ "$CODE" -ne 0 ]
 check "both sources failing says Orca may not be running" contains "$OUT" "is Orca running?"
 rm -f "$WORK/repo-list.fail" "$WORK/worktree-ps.fail"
+
+# --- a Hub folder that is a git repo of its own ------------------------------------
+
+GITHUB_HUB="$WORK/git-hub"
+mkdir -p "$GITHUB_HUB"
+printf '%s\n' "$GITHUB_HUB" >> "$ORCA_GIT_REPOS"
+run_init "$GITHUB_HUB" --apply
+check "a git repo Hub folder is accepted" [ "$CODE" -eq 0 ]
+check "a git repo Hub folder gets hub.json with its path" \
+  jq -e --arg p "$GITHUB_HUB" '.hub_path == $p' "$GITHUB_HUB/.orca-hub/hub.json"
+check "a git repo Hub folder gets the block in CLAUDE.md" grep -qxF '<!-- orca-issue-orchestrator:start -->' "$GITHUB_HUB/CLAUDE.md"
+check "a git repo Hub folder gets no ancestor note" sh -c '! printf "%s" "$1" | grep -q "claude --agent orchestrator"' _ "$OUT"
+
+# --- a Hub folder that contains repos (a project group's parent folder) ---------------
+
+ANC="$(new_hub ancestor)"
+mkdir -p "$ANC/app" "$ANC/api"
+printf '%s\n%s\n' "$ANC/app" "$ANC/api" >> "$ORCA_GIT_REPOS"
+printf 'Shared notes for every repo.\n' > "$ANC/CLAUDE.md"
+run_init "$ANC" --apply
+check "ancestor: exits 0" [ "$CODE" -eq 0 ]
+check "ancestor: CLAUDE.md keeps no block" sh -c '! grep -qF "orca-issue-orchestrator:start" "$1"' _ "$ANC/CLAUDE.md"
+check "ancestor: CLAUDE.md is left as it was" [ "$(cat "$ANC/CLAUDE.md")" = "Shared notes for every repo." ]
+check "ancestor: no AGENTS.md is created" [ ! -e "$ANC/AGENTS.md" ]
+check "ancestor: the agent file carries the instructions" grep -qF 'delegate every code change to an Orca Worker, supervise it' "$ANC/.claude/agents/orchestrator.md"
+check "ancestor: the agent file has no block markers" sh -c '! grep -qF "orca-issue-orchestrator:start" "$1"' _ "$ANC/.claude/agents/orchestrator.md"
+check "ancestor: names the repos it contains" contains "$OUT" "app, api"
+check "ancestor: says how to start the Orchestrator" contains "$OUT" "claude --agent orchestrator"
+check "ancestor: still installs the Guard" [ -x "$ANC/.orca-hub/guard.sh" ]
+run_init "$ANC" --apply
+check "ancestor: a second run reports No changes" contains "$OUT" "No changes."
+
+# An ancestor Hub folder that an older init-hub gave the block: it is removed.
+ANC2="$(new_hub ancestor2)"
+mkdir -p "$ANC2/app"
+printf '%s\n' "$ANC2/app" >> "$ORCA_GIT_REPOS"
+{
+  printf '# Shared\n\nKeep this line.\n\n'
+  printf '<!-- orca-issue-orchestrator:start -->\n## Orchestrator\n\nold text\n<!-- orca-issue-orchestrator:end -->\n'
+  printf 'And this one.\n'
+} > "$ANC2/CLAUDE.md"
+ln -s CLAUDE.md "$ANC2/AGENTS.md"
+run_init "$ANC2"
+check "ancestor with a block: the dry-run plans remove block" contains "$OUT" "remove block CLAUDE.md"
+check "ancestor with a block: the dry-run writes nothing" grep -qF "old text" "$ANC2/CLAUDE.md"
+run_init "$ANC2" --apply
+check "ancestor with a block: exits 0" [ "$CODE" -eq 0 ]
+check "ancestor with a block: the block is gone" sh -c '! grep -qF "orca-issue-orchestrator" "$1"' _ "$ANC2/CLAUDE.md"
+check "ancestor with a block: the rest is kept" sh -c 'grep -qxF "Keep this line." "$1" && grep -qxF "And this one." "$1"' _ "$ANC2/CLAUDE.md"
+check "ancestor with a block: AGENTS.md is still the symlink" [ -L "$ANC2/AGENTS.md" ]
+check "ancestor with a block: a backup of CLAUDE.md exists" sh -c 'ls "$1"/CLAUDE.md.bak.* >/dev/null' _ "$ANC2"
+check "ancestor with a block: the symlink is not planned twice" sh -c '[ "$(printf "%s" "$1" | grep -c "remove block")" -eq 1 ]' _ "$OUT"
+
+# The block init-hub writes today, then the Hub folder gains a repo: removed, no legacy note.
+ANC3="$(new_hub ancestor3)"
+run_init "$ANC3" --apply
+check "ancestor later: the block was written first" grep -qxF '<!-- orca-issue-orchestrator:start -->' "$ANC3/CLAUDE.md"
+mkdir -p "$ANC3/app"
+printf '%s\n' "$ANC3/app" >> "$ORCA_GIT_REPOS"
+run_init "$ANC3" --apply
+check "ancestor later: the current block is removed" sh -c '! grep -qF "orca-issue-orchestrator" "$1"' _ "$ANC3/CLAUDE.md"
+check "ancestor later: no note about an older unmarked block" sh -c '! printf "%s" "$1" | grep -q "older init-hub"' _ "$OUT"
 
 # --- not an Orca folder workspace ------------------------------------------------
 

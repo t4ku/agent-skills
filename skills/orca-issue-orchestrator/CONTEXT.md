@@ -5,8 +5,8 @@ Terms used across this skill, its scripts, and the Issues that drive it. Use the
 ## Roles
 
 - **Orchestrator** — an ordinary Claude Code session started in the project's Hub folder. It reads, delegates, supervises, and syncs Issues across repos. It never edits code.
-- **Hub folder** — an Orca folder workspace that sits beside a project's repos. One per project. It may instead be a git worktree of one of the repos; `hub.json` `orca_worktree_id` tells the two apart (`folder:<uuid>` for a folder workspace).
-- **Placement** — how a Worker's worktree comes to exist. From a Hub folder that is a git worktree: one `worker-start --worktree new-top-level`. From a folder-workspace Hub folder (where that is refused with `not_a_repo`): `worktree create --issue --parent-worktree folder:<uuid>`, then `worker-start --worktree identity:<key>`.
+- **Hub folder** — where the Orchestrator runs: an Orca folder workspace, or a git repo of its own. It sits beside the repos it supervises, never above them, so its instructions never reach a Worker. Several may run side by side, one per goal, each with its own `hub_id` and repos that do not overlap. One that must sit above its repos (a project group's parent folder) keeps the instructions in `.claude/agents/orchestrator.md` instead of `CLAUDE.md`.
+- **Placement** — how a Worker's worktree comes to exist: one `worker-start --worktree new-top-level --repo id:<repo-id>`, then `worktree set --issue`, from any kind of Hub folder. The Worker's worktree has no parent, so it shows under its repo in Orca's sidebar. `hub.json` `worker_parent: "hub"` uses `new-child` instead, nesting Workers under the Hub folder. Lineage is display only.
 - **Worker** — one Orca Dispatch started by the Orchestrator through `worker-start`, placed in a worktree of the target repo. It edits code, sends `worker_done` exactly once, and never touches Issues.
 
 ## Mechanisms
