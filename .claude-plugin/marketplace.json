@@ -32,9 +32,10 @@
       "name": "presentation",
       "source": "./",
       "strict": false,
-      "description": "人に見せる資料を作るスキル。スピーチ原稿から PPTX を生成する、YouTube 動画から Marp スライドや切り抜きを作る。",
+      "description": "人に見せる資料を作るスキル。スピーチ原稿から PPTX を生成する、YouTube 動画から Marp スライドや切り抜きを作る、リポジトリや Web サービスを調べて図解中心の HTML 解説セットを作る。",
       "skills": [
         "./skills/speech-slides",
+        "./skills/visual-explainer-set",
         "./skills/youtube-slide-maker"
       ]
     },

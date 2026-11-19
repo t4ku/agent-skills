@@ -34,7 +34,7 @@ agent-skills/
 |--------|--------|----------------------|
 | `engineering` | `add-github-permalinks` / `show-me` / `using-git-worktrees` | 開発作業そのものを助ける |
 | `agent-lab` | `loop-design` / `orca-issue-orchestrator` / `skill-vendor` | エージェント・スキルを作る側 |
-| `presentation` | `speech-slides` / `youtube-slide-maker` | 人に見せる資料を作る |
+| `presentation` | `speech-slides` / `visual-explainer-set` / `youtube-slide-maker` | 人に見せる資料を作る |
 | `integrations` | `airbnb-adr-simulator` | 外部サービスの API を叩く / 操作する |
 
 ## Available Skills
@@ -48,6 +48,7 @@ agent-skills/
 | `orca-issue-orchestrator` | agent-lab | Drive GitHub Issues through Orca Workers from a Hub folder session that never edits code |
 | `skill-vendor` | agent-lab | Vendor an external skill into your repo with license + provenance/attribution |
 | `speech-slides` | presentation | Generate PPTX decks for 5-min Monday morning speeches |
+| `visual-explainer-set` | presentation | Research a GitHub repo or web source and build a 10–15 page visual HTML explainer set (hub + chapters, observed/inferred tags) |
 | `youtube-slide-maker` | presentation | Build Marp slides / clip videos from a YouTube video |
 | `airbnb-adr-simulator` | integrations | Fetch Airbnb ADR / occupancy / monthly revenue estimates for an area |
 
