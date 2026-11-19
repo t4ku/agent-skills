@@ -124,7 +124,7 @@ rows="$(jq -cn --argjson rows "$rows" --argjson workers "$workers" --argjson wts
         next: (if $state == "closed-out" then [$audit]
           elif $state == "succeeded" then [$closeout, $r.repo, ($r.issue | tostring), "succeeded", "<summary_file>"]
           elif $state == "failed" then [$closeout, $r.repo, ($r.issue | tostring), "failed", "<summary_file>", "--needs", "<text>"]
-          elif $state == "working" then ["orca", "orchestration", "check", "--wait", "--types", "worker_done,escalation,question", "--timeout-ms", "570000", "--json"]
+          elif $state == "working" then ["orca", "orchestration", "check", "--json"]
           else ["orca", "orchestration", "worker-show", "--dispatch", $r.dispatch_id, "--json"] end)
       })')"
 

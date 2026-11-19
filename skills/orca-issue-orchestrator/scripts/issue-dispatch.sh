@@ -5,18 +5,18 @@
 #   issue-dispatch.sh <owner/repo> <n> [--apply] [--force] [--hub <hub-dir>]
 #   Checks the Issue (open, unassigned), the concurrency limit, and the bound
 #   Run; then claims the Issue (assign @me) and creates the Task with the Spec.
-#   It prints, and never runs, the placement: in a Hub folder that is a git worktree, one worker-start
-#   --worktree new-top-level plus worktree set; in a folder-workspace Hub
-#   (hub.json orca_worktree_id folder:<uuid>) worktree create --issue under the
-#   Hub folder, then worker-start --worktree identity:<key>.
+#   It prints, and never runs, the placement: one worker-start --worktree
+#   new-top-level --repo (hub.json worker_parent "hub": new-child --repo),
+#   then worktree set to link the worktree to the Issue. The same for every
+#   kind of Hub folder.
 #
 # Step 2 - after you ran worker-start, post the Mapping comment:
 #   issue-dispatch.sh <owner/repo> <n> --receipt <file|-> [--apply] [--hub <hub-dir>]
 #   Reads the worker-start JSON receipt. On success it posts the Mapping
 #   comment, and prints worktree set when the worktree is not yet linked to the
 #   Issue. When worker-start failed at agent_readiness with a live terminal, it
-#   prints the retry command; on not_a_repo, the folder placement. A worktree
-#   create receipt gets the worker-start to run on that worktree.
+#   prints the retry command; on not_a_repo (an Orca too old to start a Worker
+#   from a folder workspace), it says to update Orca.
 #
 # Without --apply nothing changes: every gh / orca command that would change
 # state is printed, in order. Reads (gh issue view, orca repo list, ...) run.
@@ -79,24 +79,16 @@ if [ -z "$base" ]; then
   [ -n "$base" ] || die "cannot read the default branch of $repo"
 fi
 
-# The Hub folder's Orca id when it is a folder workspace. worker-start
-# --worktree new-top-level refuses such a Hub folder with not_a_repo, so the Worker's
-# worktree is created under it first and worker-start reuses it.
-hub_folder="$(hub_folder_id)"
-
-# print_folder_placement <task-id> <identity-key>: worktree create under the
-# Hub folder, linked to the Issue, then worker-start on the new worktree.
-print_folder_placement() {
-  print_cmd orca worktree create --repo "$repo_selector" --name "$name" --base-branch "$base" --issue "$number" \
-    --setup skip --parent-worktree "${hub_folder:-folder:<hub_folder_id>}" --json
-  print_worker_start_on "$1" "$2"
-}
-
-# print_worker_start_on <task-id> <identity-key>
-print_worker_start_on() {
-  print_cmd orca orchestration worker-start --task "$1" --worktree "identity:$2" --agent claude \
-    --timeout-ms "$WORKER_TIMEOUT_MS" --json
-}
+# Placement: new-top-level gives the Worker's worktree no parent, so it shows
+# under its repo in Orca's sidebar; with --repo it works from any Hub folder,
+# a folder workspace included (Orca PR #34388). hub.json worker_parent "hub"
+# picks new-child instead, which nests the Worker under the Hub folder.
+# Lineage is display only; ask / worker_done do not depend on it.
+case "$(hub_worker_parent)" in
+  none) placement="new-top-level" ;;
+  hub) placement="new-child" ;;
+  *) die "worker_parent in hub.json must be \"none\" or \"hub\": $(hub_worker_parent)" ;;
+esac
 
 # --- Step 2: the worker-start receipt -> Mapping comment ------------------------
 
@@ -125,32 +117,14 @@ if [ -n "$receipt" ]; then
 
   r_first() { json_get "$receipt_json" "first(.. | objects | $1 | select(type == \"string\" and length > 0))"; }
 
-  # A worktree create receipt (folder placement, first command): name the
-  # worker-start that reuses the new worktree. identity is an object; take a
-  # serialized one (JSON or the bare key) as well.
-  created_key="$(json_get "$receipt_json" '.result.worktree.identity? |
-    if type == "string" then (fromjson? // {key: .}) else . end | .key? | strings')"
-  if [ -n "$created_key" ] && [ -z "$(r_first '.dispatchId?')" ]; then
-    printf 'Worktree %s created. Start the Worker in it (run it yourself; this script never does):\n\n' \
-      "$(json_get "$receipt_json" '.result.worktree.displayName // .result.worktree.id')"
-    print_worker_start_on "<task_id>" "$created_key"
-    printf '\nThen pipe the worker-start JSON into this script with --receipt - --apply.\n'
-    exit 0
-  fi
-
-  # not_a_repo has been seen as {"ok":false,"error":"not_a_repo"}; take it as
-  # an error code or a failed stage too.
+  # not_a_repo: an Orca from before PR #34388 (2026-10-27) refuses to start a
+  # Worker from a folder workspace. Seen as {"ok":false,"error":"not_a_repo"};
+  # take it as an error code or a failed stage too.
   if printf '%s' "$receipt_json" | jq -e 'select(.ok == false) | [.. | objects | (.error?, .error?.code?, .failedStage?)
       | strings] | index("not_a_repo")' > /dev/null 2>&1; then
-    repo_selector="$(orca_repo_selector "$repo")" ||
-      die "no Orca repo has gitRemoteIdentity.canonicalKey github.com/$repo; add the repo to Orca first"
-    printf 'worker-start refused the placement with not_a_repo: the Hub folder is a folder workspace, not a\n'
-    printf 'git worktree. Do not retry it. Create the worktree under the Hub folder (linked to the Issue),\n'
-    printf 'then start the Worker on its identity.key from that receipt (run them yourself):\n\n'
-    print_folder_placement "$(r_first '(.taskId? // .task_id?)' | grep . || echo '<task_id>')" "<identity_key>"
-    [ -n "$hub_folder" ] ||
-      printf '\nhub.json has no folder:<uuid> orca_worktree_id; rerun init-hub, or take the id from orca worktree ps --json.\n'
-    printf '\nNo Mapping comment was posted.\n'
+    printf 'worker-start refused the placement with not_a_repo: this Orca cannot start a Worker from a\n'
+    printf 'folder workspace. Update Orca (it needs PR #34388, merged 2026-10-27), then run the same\n'
+    printf 'worker-start again. Do not work around it. No Mapping comment was posted.\n'
     exit 3
   fi
 
@@ -184,7 +158,7 @@ if [ -n "$receipt" ]; then
 
   worktree="$(orca_worktree "$worktree_id")" || die "cannot read orca worktree list; no Mapping comment was posted"
   [ -n "$worktree" ] || die "worktree $worktree_id is not in orca worktree list"
-  # A reused worktree (folder placement) may be named by its identity key.
+  # The receipt may name the worktree by its identity key.
   worktree_id="$(json_get "$worktree" '.id')"
   # Public comments carry the worktree identity key, never <repo-id>::<path>.
   worktree_key="$(json_get "$worktree" '.identity.key')"
@@ -192,7 +166,7 @@ if [ -n "$receipt" ]; then
   [ -n "$worktree_key" ] && [ -n "$branch" ] || die "worktree $worktree_id has no identity key or branch"
   # The name the worktree was created with, kept in the block so closeout
   # never recomputes it from a title that may change: worker-start's
-  # startOptions.name, else (a reused worktree) its Orca display name. Orca
+  # startOptions.name, else its Orca display name. Orca
   # derives the branch from that name, so the branch stands in last.
   wt_name="$(r_first '.startOptions?.name?')"
   [ -n "$wt_name" ] || wt_name="$(json_get "$worktree" '.displayName | strings')"
@@ -204,7 +178,7 @@ if [ -n "$receipt" ]; then
   fi
 
   printf 'Mapping for %s#%s (%s):\n\n' "$repo" "$number" "$mode"
-  # worktree create --issue (folder placement) has linked it already.
+  # Skip worktree set when the worktree is already linked to the Issue.
   if [ "$(json_get "$worktree" '.linkedIssue')" != "$number" ]; then
     printf '# Link the worktree to the Issue in Orca (run it yourself; this script never does)\n'
     print_cmd orca worktree set --worktree "id:$worktree_id" --issue "$number" --json
@@ -258,9 +232,8 @@ spec="$(
   printf 'Issue: %s\n' "$(json_get "$issue" '.url')"
   printf 'Task: #%s %s\n\n' "$number" "$title"
   printf '## Target\n'
-  if [ -n "$hub_folder" ]; then placement="under the Hub folder"; else placement="top-level"; fi
-  printf '%s, worktree %s (a fresh %s worktree; Orca derives the branch from this name), base %s\n\n' \
-    "$repo" "$name" "$placement" "$base"
+  printf '%s, worktree %s (a fresh worktree; Orca derives the branch from this name), base %s\n\n' \
+    "$repo" "$name" "$base"
   printf '## Change\n'
   printf '%s\n\n' "$(json_get "$issue" '.body')"
   printf '## Constraints\n'
@@ -294,18 +267,12 @@ if [ "$APPLY" -eq 1 ]; then
   printf 'Created Task %s\n' "$task_id"
 fi
 
-if [ -n "$hub_folder" ]; then
-  printf '\n# 3. Create the worktree under the Hub folder, linked to the Issue, then start the Worker in it\n'
-  printf '#    with the identity.key from the worktree create receipt (run them yourself; this script never does)\n'
-  print_folder_placement "$task_id" "<identity_key>"
-else
-  printf '\n# 3. Start the Worker (run it yourself; this script never does)\n'
-  print_cmd orca orchestration worker-start --task "$task_id" --worktree new-top-level --repo "$repo_selector" \
-    --name "$name" --base-branch "$base" --agent claude --setup skip --timeout-ms "$WORKER_TIMEOUT_MS" --json
+printf '\n# 3. Start the Worker (run it yourself; this script never does), then end your turn\n'
+print_cmd orca orchestration worker-start --task "$task_id" --worktree "$placement" --repo "$repo_selector" \
+  --name "$name" --base-branch "$base" --agent claude --timeout-ms "$WORKER_TIMEOUT_MS" --json
 
-  printf '\n# 4. Link the worktree to the Issue (worktree id from the receipt; run it yourself)\n'
-  print_cmd orca worktree set --worktree "id:<worktree_id>" --issue "$number" --json
-fi
+printf '\n# 4. Link the worktree to the Issue (worktree id from the receipt; run it yourself)\n'
+print_cmd orca worktree set --worktree "id:<worktree_id>" --issue "$number" --json
 
 printf '\n# 5. Post the Mapping comment (from the worker-start receipt)\n'
 print_cmd gh issue comment "$number" -R "$repo" --body-file -

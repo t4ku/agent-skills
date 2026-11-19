@@ -15,12 +15,19 @@
 # every other byte is kept. A second run with the same arguments reports
 # "No changes."
 #
-# The Hub folder must be an Orca folder workspace (`orca repo list --json`
-# reports it with kind "folder", or `orca worktree ps --json` with
-# workspaceKind "folder-workspace", as for a folder created in the Orca app);
-# otherwise the setup command is printed and the script exits 2. Nothing
-# outside the Hub folder is written, in particular nothing under ~/.claude,
-# ~/.codex or ~/.orca.
+# The Hub folder must be known to Orca: a folder workspace (`orca repo list
+# --json` reports it with kind "folder", or `orca worktree ps --json` with
+# workspaceKind "folder-workspace", as for a folder created in the Orca app),
+# or a git repo of its own (`orca repo list --json`, any other kind). Otherwise
+# the setup command is printed and the script exits 2. Nothing outside the Hub
+# folder is written, in particular nothing under ~/.claude, ~/.codex or ~/.orca.
+#
+# A Hub folder that contains a repo Orca knows (for instance a project group's
+# parent folder) is an ancestor of that repo and of its Workers' worktrees.
+# Claude Code loads an ancestor's CLAUDE.md into every session below it, so
+# init-hub then keeps the Orchestrator block out of CLAUDE.md and AGENTS.md
+# (removing one it wrote before) and the Orchestrator starts with
+# `claude --agent orchestrator`.
 #
 # Dependencies: bash (3.2+), jq, coreutils, orca. What the written files do:
 # references/guard.md. Tests: tests/init-hub.test.sh.
@@ -32,7 +39,7 @@ SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GUARD_SRC="$SCRIPT_DIR/guard.sh"
 
 HOOK_MATCHER='Bash|Edit|Write|NotebookEdit'
-DENY_JSON='["Bash(rm -rf *)","Bash(git push *)","Bash(gh issue close *)","Bash(gh issue delete *)","Bash(gh pr merge *)","Bash(gh repo delete *)"]'
+DENY_JSON='["Bash(rm -rf *)","Bash(git push *)","Bash(gh issue close *)","Bash(gh issue delete *)","Bash(gh pr merge *)","Bash(gh repo delete *)","Bash(orca orchestration reset *)"]'
 AGENT_TOOLS='Read, Grep, Glob, Bash, Agent, Skill, WebFetch, WebSearch, TodoWrite'
 EMPTY_DIRS='docs research tmp'
 BLOCK_START='<!-- orca-issue-orchestrator:start -->'
@@ -100,7 +107,8 @@ not_workspace() {
   printf 'Create the folder and register it with Orca as a folder workspace, then run init-hub again:\n\n' >&2
   [ -d "$1" ] || printf '  mkdir -p %s\n' "$1" >&2
   printf '  orca project setup-existing-folder --project <project-id> --host local --path %s --kind folder\n\n' "$1" >&2
-  printf 'or add the folder in the Orca app.\n' >&2
+  printf 'or add the folder in the Orca app. A Hub folder that is a git repo of its own works too:\n' >&2
+  printf 'git init it and add it with `orca repo add`.\n' >&2
   echo "(Run \`orca project list\` to see the project ids.)" >&2
   exit 2
 }
@@ -136,10 +144,14 @@ EOF
 
 failed_sources=""
 list_row=""
+git_row=""
 ps_row=""
-if json="$(orca repo list --json 2>/dev/null)"; then
-  list_row="$(matching_row "$(printf '%s' "$json" | jq -r '.result.repos[]? | select(.kind == "folder") | [.path // "", "", ""] | join("\u001f")' 2>/dev/null)")"
+repo_json=""
+if repo_json="$(orca repo list --json 2>/dev/null)"; then
+  list_row="$(matching_row "$(printf '%s' "$repo_json" | jq -r '.result.repos[]? | select(.kind == "folder") | [.path // "", "", ""] | join("\u001f")' 2>/dev/null)")"
+  git_row="$(matching_row "$(printf '%s' "$repo_json" | jq -r '.result.repos[]? | select(.kind != "folder") | [.path // "", "", ""] | join("\u001f")' 2>/dev/null)")"
 else
+  repo_json=""
   failed_sources="orca repo list"
 fi
 if json="$(orca worktree ps --json 2>/dev/null)"; then
@@ -147,17 +159,31 @@ if json="$(orca worktree ps --json 2>/dev/null)"; then
 else
   failed_sources="${failed_sources:+$failed_sources and }orca worktree ps"
 fi
-if [ -z "$list_row$ps_row" ]; then
+if [ -z "$list_row$git_row$ps_row" ]; then
   [ -z "$failed_sources" ] ||
     not_workspace "$hub_real" "$failed_sources failed (is Orca running?), so the folder cannot be confirmed as an Orca folder workspace."
-  not_workspace "$hub_real" "$hub_real is not an Orca folder workspace: neither \`orca repo list --json\` (kind \"folder\") nor \`orca worktree ps --json\` (workspaceKind \"folder-workspace\") reports it."
+  not_workspace "$hub_real" "$hub_real is not known to Orca: neither \`orca repo list --json\` (a folder or a repo) nor \`orca worktree ps --json\` (workspaceKind \"folder-workspace\") reports it."
 fi
 # The repo list path wins (as before); the Orca ids come from worktree ps only.
 IFS=$'\037' read -r hub_path _ _ <<EOF
-${list_row:-$ps_row}
+${list_row:-${git_row:-$ps_row}}
 EOF
 IFS=$'\037' read -r _ orca_worktree_id orca_display_name <<EOF
 $ps_row
+EOF
+
+# --- does the Hub folder contain a repo? ------------------------------------------
+
+# ancestor_of: the repos Orca knows that sit below the Hub folder, comma-separated.
+ancestor_of=""
+while IFS=$'\037' read -r p name; do
+  [ -n "$p" ] || continue
+  rp="$(cd "$p" 2>/dev/null && pwd -P)" || continue
+  case "$rp/" in
+    "$hub_real"/?*) ancestor_of="$ancestor_of${ancestor_of:+, }$name" ;;
+  esac
+done <<EOF
+$(printf '%s' "$repo_json" | jq -r '.result.repos[]? | select(.kind != "folder") | [.path // "", (.displayName // .name // .path // "")] | join("\u001f")' 2>/dev/null)
 EOF
 
 # --- staging ----------------------------------------------------------------------
@@ -335,10 +361,59 @@ stage_block() {
   fi
 }
 
+# stage_unblock <relative path>: in a Hub folder that is an ancestor of a repo,
+# stage the file without the block and record remove block. A missing file, or
+# one without the block, is left alone (and not created).
+stage_unblock() {
+  local rel="$1" target="$hub_real/$1" out src starts ends
+  [ -e "$target" ] || [ -L "$target" ] || return 0
+  inside_hub "$rel" || die "$rel resolves outside the Hub folder; refusing to write through a symlink"
+  if [ -L "$target" ]; then
+    [ -f "$target" ] || die "$rel is a symlink that does not point to a file; fix or remove it first"
+    src="$(resolve_file "$target")"
+    case "$src" in
+      "$hub_real"/*) ;;
+      *) die "$rel is a symlink to a file outside the Hub folder; refusing to write through it" ;;
+    esac
+  elif [ -f "$target" ]; then
+    src="$target"
+  else
+    return 0
+  fi
+  # AGENTS.md -> CLAUDE.md: the block goes once, through the first name.
+  case " $unblocked " in *" $src "*) return 0 ;; esac
+  unblocked="$unblocked $src"
+  starts="$(marker_lines "$src" "$BLOCK_START")"
+  ends="$(marker_lines "$src" "$BLOCK_END")"
+  if [ -z "$starts$ends" ]; then
+    # The unmarked text an older init-hub wrote (the block repeats the line).
+    ! grep -q -F -e "$LEGACY_LINE" -- "$src" || legacy_files="$legacy_files $rel"
+    return 0
+  fi
+  case "$starts$ends" in
+    *[!0-9]*) die "$rel has more than one $BLOCK_START or $BLOCK_END line; fix it by hand" ;;
+  esac
+  [ -n "$starts" ] && [ -n "$ends" ] && [ "$starts" -lt "$ends" ] ||
+    die "$rel has an unmatched $BLOCK_START or $BLOCK_END line; fix it by hand"
+  out="$(staged "$rel")"
+  {
+    [ "$starts" -le 1 ] || head -n "$((starts - 1))" -- "$src"
+    tail -n "+$((ends + 1))" -- "$src"
+  } > "$out"
+  plan_paths+=("$rel")
+  plan_actions+=("remove block")
+}
+
 LEGACY_LINE='This is the Hub folder of the orca-issue-orchestrator skill.'
 legacy_files=""
-stage_block CLAUDE.md
-stage_block AGENTS.md
+unblocked=""
+if [ -n "$ancestor_of" ]; then
+  stage_unblock CLAUDE.md
+  stage_unblock AGENTS.md
+else
+  stage_block CLAUDE.md
+  stage_block AGENTS.md
+fi
 
 # .claude/settings.json: add the Guard hook and the denies; keep everything else.
 guard_path="$hub_path/.orca-hub/guard.sh"
@@ -371,7 +446,9 @@ description: The Orchestrator of this Hub folder. Reads GitHub Issues, dispatche
 tools: $AGENT_TOOLS
 ---
 
-You are the Orchestrator of this Hub folder. Follow CLAUDE.md and the orca-issue-orchestrator skill (/orca-issue-orchestrator). You have no editing tools: delegate every code change to an Orca Worker.
+You are the Orchestrator of this Hub folder. Follow the orca-issue-orchestrator skill (/orca-issue-orchestrator) and the instructions below. You have no editing tools: delegate every code change to an Orca Worker.
+
+$(sed -e '1,4d' -e '$d' "$BLOCK")
 EOF
 stage .claude/agents/orchestrator.md
 
@@ -483,7 +560,7 @@ while [ "$i" -lt "${#plan_paths[@]}" ]; do
     update)
       backup="$(backup_name "$rel")"
       printf '  update  %s (backup: %s)\n' "$rel" "$backup" ;;
-    "append block"|"update block")
+    "append block"|"update block"|"remove block")
       backup="$(backup_name "$rel")"
       printf '  %s %s (backup: %s)\n' "$action" "$rel" "$backup"
       changes=$((changes + 1))
@@ -511,6 +588,15 @@ fi
 for f in $legacy_files; do
   printf '\nNote: %s already holds the instructions an older init-hub wrote without markers. After --apply, delete those lines outside the %s block by hand.\n' "$f" "$BLOCK_START"
 done
+
+if [ -n "$ancestor_of" ]; then
+  printf '\nNote: the Hub folder contains repos Orca knows (%s). Claude Code loads its CLAUDE.md into\n' "$ancestor_of"
+  printf 'every session below it, Workers included, so the Orchestrator instructions stay out of CLAUDE.md\n'
+  printf 'and AGENTS.md and live in .claude/agents/orchestrator.md only. Start the Orchestrator with:\n'
+  printf '  claude --agent orchestrator\n'
+  printf 'A plain `claude` here runs without them. Codex has no such layer: use Claude Code here, or move\n'
+  printf 'the Hub folder beside the repos.\n'
+fi
 
 if [ "$changes" -eq 0 ]; then
   printf '\nNo changes.\n'
