@@ -167,9 +167,21 @@ expect_deny "Bash: orca orchestration reset behind global options" \
 expect_deny "Bash: orca orchestration reset after &&" "$(bash_json 'ls && orca orchestration reset --messages')" "orca orchestration reset"
 expect_deny "Bash: orca orchestration subcommand that needs expansion" \
   "$(bash_json 'orca orchestration $CMD --all')" 'orca orchestration $CMD'
+expect_deny "Bash: orca orchestration reset after an option that takes a value" \
+  "$(bash_json 'orca orchestration --environment local reset --all')" "orca orchestration reset"
+expect_deny "Bash: orca orchestration reset after an unknown option value" \
+  "$(bash_json 'orca orchestration --run run_1 reset --tasks')" "orca orchestration reset"
 expect_allow "Bash: orca orchestration run-list" "$(bash_json 'orca orchestration run-list --json')"
-expect_allow "Bash: the word reset as a message body" \
-  "$(bash_json 'orca orchestration reply --id m1 --body reset')"
+expect_allow "Bash: reset inside a longer message body" \
+  "$(bash_json 'orca orchestration reply --id m1 --body "reset the cache first"')"
+expect_allow "Bash: --opt=reset is an option value, not the subcommand" \
+  "$(bash_json 'orca orchestration send --subject=reset --body x')"
+expect_deny "Bash: find -exec hides a command" "$(bash_json 'find . -exec orca orchestration reset --all \;')" "find -exec"
+expect_deny "Bash: find -execdir" "$(bash_json 'find . -execdir rm {} +')" "find -execdir"
+expect_deny "Bash: find -ok" "$(bash_json 'find . -ok rm {} \;')" "find -ok"
+expect_deny "Bash: find -delete" "$(bash_json 'find tmp -name x -delete')" "find -delete"
+expect_deny "Bash: find -fprint writes a file" "$(bash_json 'find . -fprint out.txt')" "find -fprint"
+expect_allow "Bash: find with -name and -type" "$(bash_json 'find docs -name "*.md" -type f')"
 expect_deny "Bash: command not on the allowlist" "$(bash_json 'rm -rf src')" rm
 expect_deny "Bash: git subcommand not allowed" "$(bash_json 'git commit -m x')" "git commit"
 expect_deny "Bash: git without a subcommand" "$(bash_json 'git')" "git"

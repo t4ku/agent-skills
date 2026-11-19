@@ -171,9 +171,10 @@ scan_word() {
 
 # check_orca <segment> <index>: deny `orca orchestration reset`. It wipes the
 # orchestration state of the whole Orca runtime, so one Hub would erase the
-# Runs of every other Hub on the machine. The subcommand is the first word
-# after `orchestration` that is not an option; one that needs expansion is
-# denied, since it could be reset.
+# Runs of every other Hub on the machine. Options may take values, so the
+# subcommand cannot be told from an option value: after `orchestration`, any
+# word that is exactly `reset`, or that needs expansion, is denied. A
+# message body of just "reset" is denied too; reword it.
 check_orca() {
   local seg="$1" pos="$2" after=0 ok
   while :; do
@@ -182,12 +183,26 @@ check_orca() {
     [ -n "$word_raw" ] || return 0
     pos=$word_end
     if [ "$after" -eq 1 ]; then
-      case "$word" in -*) continue ;; esac
       [ "$ok" -eq 1 ] || deny "orca orchestration $word_raw"
       [ "$word" = reset ] && deny "orca orchestration reset"
-      return 0
+    elif [ "$ok" -eq 1 ] && [ "$word" = orchestration ]; then
+      after=1
     fi
-    [ "$ok" -eq 1 ] && [ "$word" = orchestration ] && after=1
+  done
+}
+
+# check_find <segment> <index>: deny the find actions that run a command or
+# write (-exec, -execdir, -ok, -okdir, -delete, -fprint*, -fls), so find can
+# neither hide a denied command such as `orca orchestration reset` nor delete.
+check_find() {
+  local seg="$1" pos="$2"
+  while :; do
+    scan_word "$seg" "$pos" || true
+    [ -n "$word_raw" ] || return 0
+    pos=$word_end
+    case "$word" in
+      -exec|-execdir|-ok|-okdir|-delete|-fprint|-fprint0|-fprintf|-fls) deny "find $word" ;;
+    esac
   done
 }
 
@@ -208,6 +223,7 @@ check_segment() {
     deny "git${second:+ $second}"
   fi
   [ "$first" = orca ] && check_orca "$seg" "$word_end"
+  [ "$first" = find ] && check_find "$seg" "$word_end"
   in_list "$first" "$ALLOWED_COMMANDS" && return 0
   in_bash_allow "$first" && return 0
   # ${first##*/} rather than basename(1): $(...) would strip trailing newlines.

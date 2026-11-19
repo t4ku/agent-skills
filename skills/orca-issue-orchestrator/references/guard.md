@@ -65,7 +65,7 @@ Bash(rm -rf *)  Bash(git push *)  Bash(gh issue close *)  Bash(gh issue delete *
 Bash(orca orchestration reset *)
 ```
 
-`orca orchestration reset` wipes the orchestration state of the whole Orca runtime, so one Hub folder would erase the Runs of every other. The hook denies it too, also behind global options (`orca --environment local orchestration reset`) or when the subcommand needs expansion.
+`orca orchestration reset` wipes the orchestration state of the whole Orca runtime, so one Hub folder would erase the Runs of every other. The hook denies it too: any word after `orchestration` that is exactly `reset` or needs expansion, so an option value before it (`orca orchestration --environment local reset`) does not hide it. A message body of just `reset` is refused as well; reword it. The hook also refuses `find` with `-exec`, `-execdir`, `-ok`, `-okdir`, `-delete`, `-fprint*` or `-fls`, which could run `reset` or delete files.
 
 There is deliberately no bare `Edit`, `Write`, or `NotebookEdit` deny: it would also block the four note directories, and a bare `Agent` deny would disable subagents before any hook runs.
 
@@ -86,7 +86,7 @@ The Codex path has not been verified on a real machine. After starting it, run `
 
 Without `--sandbox read-only` a folder outside git may be writable, and `AGENTS.md` alone enforces nothing.
 
-Known gap: an `allow` rule runs its whole command outside the sandbox, so options of allowlisted commands can still write (`find -delete`, `git branch -D`, `gh api -X DELETE`). The same options pass the Claude Code Guard; see the known gaps in `references/hub-json.md`.
+Known gap: an `allow` rule runs its whole command outside the sandbox, so options of allowlisted commands can still write (`find -delete`, `git branch -D`, `gh api -X DELETE`); the Claude Code Guard refuses the `find` actions, Codex does not. The other options pass the Claude Code Guard; see the known gaps in `references/hub-json.md`.
 
 ## How to read a denial
 
