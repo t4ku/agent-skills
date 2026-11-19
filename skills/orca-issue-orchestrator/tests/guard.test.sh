@@ -166,7 +166,7 @@ expect_deny "Bash: orca orchestration reset behind global options" \
   "$(bash_json 'orca --environment local orchestration --json reset --tasks')" "orca orchestration reset"
 expect_deny "Bash: orca orchestration reset after &&" "$(bash_json 'ls && orca orchestration reset --messages')" "orca orchestration reset"
 expect_deny "Bash: orca orchestration subcommand that needs expansion" \
-  "$(bash_json 'orca orchestration $CMD --all')" 'orca orchestration $CMD'
+  "$(bash_json 'orca orchestration $CMD --all')" 'orca $CMD'
 expect_deny "Bash: orca orchestration reset after an option that takes a value" \
   "$(bash_json 'orca orchestration --environment local reset --all')" "orca orchestration reset"
 expect_deny "Bash: orca orchestration reset after an unknown option value" \
@@ -181,6 +181,16 @@ expect_deny "Bash: find -execdir" "$(bash_json 'find . -execdir rm {} +')" "find
 expect_deny "Bash: find -ok" "$(bash_json 'find . -ok rm {} \;')" "find -ok"
 expect_deny "Bash: find -delete" "$(bash_json 'find tmp -name x -delete')" "find -delete"
 expect_deny "Bash: find -fprint writes a file" "$(bash_json 'find . -fprint out.txt')" "find -fprint"
+expect_deny "Bash: orca with orchestration spelled by expansion" \
+  "$(bash_json "orca orchestr\$'ation' reset --all")" "orca orchestr\$'ation'"
+expect_deny "Bash: orca with reset spelled by expansion" \
+  "$(bash_json "orca orchestration res\$'et' --all")" "orca res\$'et'"
+expect_deny "Bash: orca with a variable before orchestration" \
+  "$(bash_json 'orca $SUB reset')" 'orca $SUB'
+expect_deny "Bash: find with an action spelled by expansion" \
+  "$(bash_json "find . -ex\$'ec' rm {} ;")" "find -ex\$'ec'"
+expect_deny "Bash: find -exec+ style prefix (-execdir variants)" "$(bash_json 'find . -execdirx rm')" "find -execdirx"
+expect_allow "Bash: find with a quoted glob" "$(bash_json "find docs -name '*.md'")"
 expect_allow "Bash: find with -name and -type" "$(bash_json 'find docs -name "*.md" -type f')"
 expect_deny "Bash: command not on the allowlist" "$(bash_json 'rm -rf src')" rm
 expect_deny "Bash: git subcommand not allowed" "$(bash_json 'git commit -m x')" "git commit"

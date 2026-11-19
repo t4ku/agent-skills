@@ -65,7 +65,7 @@ Bash(rm -rf *)  Bash(git push *)  Bash(gh issue close *)  Bash(gh issue delete *
 Bash(orca orchestration reset *)
 ```
 
-`orca orchestration reset` wipes the orchestration state of the whole Orca runtime, so one Hub folder would erase the Runs of every other. The hook denies it too: any word after `orchestration` that is exactly `reset` or needs expansion, so an option value before it (`orca orchestration --environment local reset`) does not hide it. A message body of just `reset` is refused as well; reword it. The hook also refuses `find` with `-exec`, `-execdir`, `-ok`, `-okdir`, `-delete`, `-fprint*` or `-fls`, which could run `reset` or delete files.
+`orca orchestration reset` wipes the orchestration state of the whole Orca runtime, so one Hub folder would erase the Runs of every other. The hook denies it too: any word after `orchestration` that is exactly `reset`, so an option value before it (`orca orchestration --environment local reset`) does not hide it, and any word of an `orca` command that needs expansion (`$VAR`, `$'...'`), which could spell `orchestration` or `reset`. A message body of just `reset`, or one passed as `"$VAR"`, is refused as well; write the text out. The hook also refuses `find` with `-exec*`, `-ok*`, `-delete`, `-fprint*` or `-fls`, which could run `reset` or delete files, and any `find` argument that needs expansion.
 
 There is deliberately no bare `Edit`, `Write`, or `NotebookEdit` deny: it would also block the four note directories, and a bare `Agent` deny would disable subagents before any hook runs.
 

@@ -173,35 +173,35 @@ scan_word() {
 # orchestration state of the whole Orca runtime, so one Hub would erase the
 # Runs of every other Hub on the machine. Options may take values, so the
 # subcommand cannot be told from an option value: after `orchestration`, any
-# word that is exactly `reset`, or that needs expansion, is denied. A
-# message body of just "reset" is denied too; reword it.
+# word that is exactly `reset` is denied (a message body of just "reset" too;
+# reword it). Any word of the segment that needs expansion is denied, since
+# it could spell `orchestration` or `reset`.
 check_orca() {
-  local seg="$1" pos="$2" after=0 ok
+  local seg="$1" pos="$2" after=0
   while :; do
-    ok=0
-    scan_word "$seg" "$pos" && ok=1
+    scan_word "$seg" "$pos" || deny "orca $word_raw"
     [ -n "$word_raw" ] || return 0
     pos=$word_end
     if [ "$after" -eq 1 ]; then
-      [ "$ok" -eq 1 ] || deny "orca orchestration $word_raw"
       [ "$word" = reset ] && deny "orca orchestration reset"
-    elif [ "$ok" -eq 1 ] && [ "$word" = orchestration ]; then
+    elif [ "$word" = orchestration ]; then
       after=1
     fi
   done
 }
 
 # check_find <segment> <index>: deny the find actions that run a command or
-# write (-exec, -execdir, -ok, -okdir, -delete, -fprint*, -fls), so find can
-# neither hide a denied command such as `orca orchestration reset` nor delete.
+# write (-exec*, -ok*, -delete, -fprint*, -fls), so find can neither hide a
+# denied command such as `orca orchestration reset` nor delete. Any argument
+# that needs expansion is denied, since it could spell one of them.
 check_find() {
   local seg="$1" pos="$2"
   while :; do
-    scan_word "$seg" "$pos" || true
+    scan_word "$seg" "$pos" || deny "find $word_raw"
     [ -n "$word_raw" ] || return 0
     pos=$word_end
     case "$word" in
-      -exec|-execdir|-ok|-okdir|-delete|-fprint|-fprint0|-fprintf|-fls) deny "find $word" ;;
+      -exec*|-ok*|-delete|-fprint*|-fls) deny "find $word" ;;
     esac
   done
 }
