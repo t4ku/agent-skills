@@ -21,10 +21,11 @@
       "name": "agent-lab",
       "source": "./",
       "strict": false,
-      "description": "エージェントとスキルを作る側のスキル。外部スキルをライセンス・provenance 付きで取り込む、自走ループの spec を 7 要素で書く、GitHub Issues を Orca Worker に委譲して進める Orchestrator を動かす。",
+      "description": "エージェントとスキルを作る側のスキル。外部スキルをライセンス・provenance 付きで取り込む、自走ループの spec を 7 要素で書く、GitHub Issues を Orca Worker に委譲して進める Orchestrator を動かす、Orca CLI 自体の運用（司令塔、完了判定、プロジェクト登録）を行う。",
       "skills": [
         "./skills/loop-design",
         "./skills/orca-issue-orchestrator",
+        "./skills/orca-operations",
         "./skills/skill-vendor"
       ]
     },
