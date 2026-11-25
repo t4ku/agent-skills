@@ -169,6 +169,43 @@ scan_word() {
   [ -z "$quote" ] && [ "$bad" -eq 0 ]
 }
 
+# check_orca <segment> <index>: deny `orca orchestration reset`. It wipes the
+# orchestration state of the whole Orca runtime, so one Hub would erase the
+# Runs of every other Hub on the machine. Options may take values, so the
+# subcommand cannot be told from an option value: after `orchestration`, any
+# word that is exactly `reset` is denied (a message body of just "reset" too;
+# reword it). Any word of the segment that needs expansion is denied, since
+# it could spell `orchestration` or `reset`.
+check_orca() {
+  local seg="$1" pos="$2" after=0
+  while :; do
+    scan_word "$seg" "$pos" || deny "orca $word_raw"
+    [ -n "$word_raw" ] || return 0
+    pos=$word_end
+    if [ "$after" -eq 1 ]; then
+      [ "$word" = reset ] && deny "orca orchestration reset"
+    elif [ "$word" = orchestration ]; then
+      after=1
+    fi
+  done
+}
+
+# check_find <segment> <index>: deny the find actions that run a command or
+# write (-exec*, -ok*, -delete, -fprint*, -fls), so find can neither hide a
+# denied command such as `orca orchestration reset` nor delete. Any argument
+# that needs expansion is denied, since it could spell one of them.
+check_find() {
+  local seg="$1" pos="$2"
+  while :; do
+    scan_word "$seg" "$pos" || deny "find $word_raw"
+    [ -n "$word_raw" ] || return 0
+    pos=$word_end
+    case "$word" in
+      -exec*|-ok*|-delete|-fprint*|-fls) deny "find $word" ;;
+    esac
+  done
+}
+
 # check_segment <segment>: deny unless the segment may run.
 check_segment() {
   local seg="$1" first second
@@ -185,6 +222,8 @@ check_segment() {
     in_list "$second" "$ALLOWED_GIT" && return 0
     deny "git${second:+ $second}"
   fi
+  [ "$first" = orca ] && check_orca "$seg" "$word_end"
+  [ "$first" = find ] && check_find "$seg" "$word_end"
   in_list "$first" "$ALLOWED_COMMANDS" && return 0
   in_bash_allow "$first" && return 0
   # ${first##*/} rather than basename(1): $(...) would strip trailing newlines.

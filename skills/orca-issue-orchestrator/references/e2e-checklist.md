@@ -108,17 +108,17 @@ Ask the Orchestrator to "take #123" and let it follow "The loop" in [issue-sync.
 
 - [ ] **Claim and Task** (`issue-dispatch.sh <owner>/<repo> 123`, then `--apply`).
 
-  **Proves it:** Issue 123 is assigned to you on GitHub; the output prints the placement for this Hub ([Two placements](issue-sync.md#two-placements)). Hub folder that is a git worktree: a `worker-start --worktree new-top-level ... --timeout-ms 300000 --json` and an `orca worktree set` line. Folder-workspace Hub folder (`hub.json` `orca_worktree_id` is `folder:<uuid>`): `orca worktree create ... --issue 123 --parent-worktree folder:<uuid> --json`, then `worker-start --worktree identity:<identity_key> ... --json`, and no `orca worktree set`.
+  **Proves it:** Issue 123 is assigned to you on GitHub; the output prints the [Placement](issue-sync.md#placement): a `worker-start --worktree new-top-level --repo id:<repo-id> ... --timeout-ms 300000 --json` and an `orca worktree set` line, the same for a folder-workspace and a git Hub folder.
 
-- [ ] **Worker started, Mapping comment posted** (the printed placement, its `worker-start` receipt piped into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`, then the printed `orca worktree set` on a git-worktree Hub folder).
+- [ ] **Worker started, Mapping comment posted** (the printed `worker-start`, its receipt piped into `issue-dispatch.sh <owner>/<repo> 123 --receipt - --apply`, then the printed `orca worktree set`).
 
-  **Proves it:** a new worktree `issue-123-<slug>` appears in Orca, linked to Issue 123 in the sidebar (on a folder-workspace Hub folder, nested under the Hub folder); the Issue has one comment that starts with `> *Posted by an AI orchestrator.*`, names the worktree, branch, Run, Task, and Dispatch, ends with an `<!-- orca-issue-orchestrator {...} -->` block carrying `"hub":"<hub_id>"`, and contains no local path.
+  **Proves it:** a new worktree `issue-123-<slug>` appears in Orca, linked to Issue 123 in the sidebar, under its repo and not nested under the Hub folder; the Issue has one comment that starts with `> *Posted by an AI orchestrator.*`, names the worktree, branch, Run, Task, and Dispatch, ends with an `<!-- orca-issue-orchestrator {...} -->` block carrying `"hub":"<hub_id>"`, and contains no local path.
 
-  **Record:** worktree ____ / placement (git worktree or folder workspace) ____ / did `worker-start` fail at `agent_readiness` or `not_a_repo`, and did the printed retry or folder placement work? ____
+  **Record:** worktree ____ / Hub folder kind (folder workspace or git repo) ____ / did `worker-start` fail at `agent_readiness` or `not_a_repo`, and what did you do? ____
 
-- [ ] **Wait and ask.** The Orchestrator waits with `orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 570000 --json` and repeats it after an empty wait. If the Worker asks a question, note whether the Orchestrator answered from the Issue or relayed it to you.
+- [ ] **Wait and ask.** After starting the Worker the Orchestrator ends its turn without polling (no `check --wait` loop). Orca wakes it when the Worker asks or sends `worker_done`; it then runs `orca orchestration check --json`. If the Worker asks a question, note whether the Orchestrator answered from the Issue or relayed it to you.
 
-  **Record:** number of waits ____ / questions and how they were answered ____
+  **Record:** did Orca wake the Orchestrator (yes / no, and on which message) ____ / questions and how they were answered ____
 
 - [ ] **PR open.** The Worker opens a PR.
 

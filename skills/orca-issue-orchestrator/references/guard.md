@@ -7,7 +7,7 @@ What stops the Orchestrator from editing code. `scripts/init-hub.sh` writes ever
 | Hard stop on edits | PreToolUse hook `.orca-hub/guard.sh` | `--sandbox read-only -a never` |
 | Command allowlist | the same hook (Bash) | `.codex/rules/orchestrator.rules` (execpolicy) |
 | Destructive-command safety net | `permissions.deny` in `.claude/settings.json` | `forbidden` rules in the same `.rules` file |
-| Instructions | the Orchestrator block in `CLAUDE.md`, optional `.claude/agents/orchestrator.md` | the same block in `AGENTS.md` |
+| Instructions | the Orchestrator block in `CLAUDE.md`, and `.claude/agents/orchestrator.md` (the only place when the Hub folder contains a repo) | the same block in `AGENTS.md` |
 
 ### The Orchestrator block in CLAUDE.md and AGENTS.md
 
@@ -27,6 +27,9 @@ Every byte outside the markers is the folder's own and is kept, so an existing m
 | `append block` | the file exists without markers; the block is appended after one blank line | yes |
 | `update block` | the markers exist but the lines between them differ from the current text | yes |
 | `keep` | the block is current; the file is not touched | no |
+| `remove block` | the Hub folder contains a repo Orca knows and the file holds the block; the lines between the markers, markers included, are removed | yes |
+
+**A Hub folder above its repos.** When `orca repo list --json` reports a repo below the Hub folder (a project group's parent folder, say), the block would reach every session below it, Worker worktrees included, since Claude Code loads every ancestor's `CLAUDE.md` and Orca puts Worker worktrees inside their repo. `init-hub` then writes no block (a missing `CLAUDE.md` / `AGENTS.md` is not created) and removes one it wrote before; the instructions live only in `.claude/agents/orchestrator.md`, and the Orchestrator starts with `claude --agent orchestrator`. A plain `claude` there runs without them, and Codex has no such layer. Moving the Hub folder beside the repos avoids all three.
 
 Edits between the markers are replaced on the next `--apply`; put your own text outside them. A file with more than one marker of a kind, a marker without its partner, or an end before the start stops `init-hub` before anything is written. Marker lines inside a ``` or ~~~ fence are examples and are ignored. A symlink to a file inside the Hub folder (for example `AGENTS.md -> CLAUDE.md`) is merged and written through, so it stays a link; a symlink out of the Hub folder stops `init-hub`. The block is written with LF line endings. A Hub folder initialised before the block existed has the old five-line text without markers; the plan prints a note, and after the `append block` run you delete those lines by hand.
 
@@ -51,15 +54,18 @@ The exact parsing rules and known gaps: `references/hub-json.md`, "How the Guard
 
 `.orca-hub/guard.sh` is a copy of `scripts/guard.sh`, not a symlink, with an `# installed-by: ... skill version <x>` line under the shebang. To pick up a newer Guard, re-run `init-hub --apply`; the old copy is kept as a backup.
 
-`init-hub` never sets the `agent` key in `settings.json`: an agent body replaces the default system prompt of every session in the Hub folder, including planning sessions run by a human. `.claude/agents/orchestrator.md` (no Edit / Write / NotebookEdit tools) is used only when a human starts `claude --agent orchestrator`.
+`init-hub` never sets the `agent` key in `settings.json`: an agent body replaces the default system prompt of every session in the Hub folder, including planning sessions run by a human. `.claude/agents/orchestrator.md` (no Edit / Write / NotebookEdit tools) carries the same instructions as the block and is used only when a human starts `claude --agent orchestrator`.
 
 ## The `permissions.deny` safety net
 
-Six rules that hold even if the hook is missing or crashes:
+Seven rules that hold even if the hook is missing or crashes:
 
 ```
 Bash(rm -rf *)  Bash(git push *)  Bash(gh issue close *)  Bash(gh issue delete *)  Bash(gh pr merge *)  Bash(gh repo delete *)
+Bash(orca orchestration reset *)
 ```
+
+`orca orchestration reset` wipes the orchestration state of the whole Orca runtime, so one Hub folder would erase the Runs of every other. The hook denies it too: any word after `orchestration` that is exactly `reset`, so an option value before it (`orca orchestration --environment local reset`) does not hide it, and any word of an `orca` command that needs expansion (`$VAR`, `$'...'`), which could spell `orchestration` or `reset`. A message body of just `reset`, or one passed as `"$VAR"`, is refused as well; write the text out. The hook also refuses `find` with `-exec*`, `-ok*`, `-delete`, `-fprint*` or `-fls`, which could run `reset` or delete files, and any `find` argument that needs expansion.
 
 There is deliberately no bare `Edit`, `Write`, or `NotebookEdit` deny: it would also block the four note directories, and a bare `Agent` deny would disable subagents before any hook runs.
 
@@ -68,7 +74,7 @@ There is deliberately no bare `Edit`, `Write`, or `NotebookEdit` deny: it would 
 The Codex path has not been verified on a real machine. After starting it, run `/status` and confirm the sandbox is **read-only**; if it is not, stop and use Claude Code.
 
 - `.codex/config.toml` sets `sandbox_mode = "read-only"` and `approval_policy = "never"`. With `never`, patches are rejected outright and shell writes are refused by the OS sandbox.
-- `.codex/rules/orchestrator.rules` holds execpolicy `prefix_rule(...)` entries: `allow` for every command on the Guard's Bash allowlist (read from `scripts/guard.sh`, git by subcommand) plus `bash_allow[]`, and `forbidden` for the six `permissions.deny` commands. `allow` runs outside the sandbox, which is how `orca` and `gh` reach the network. The skill scripts are allowlisted by basename in the Claude Code Guard only.
+- `.codex/rules/orchestrator.rules` holds execpolicy `prefix_rule(...)` entries: `allow` for every command on the Guard's Bash allowlist (read from `scripts/guard.sh`, git by subcommand) plus `bash_allow[]`, and `forbidden` for the seven `permissions.deny` commands. `allow` runs outside the sandbox, which is how `orca` and `gh` reach the network. The skill scripts are allowlisted by basename in the Claude Code Guard only.
 - There is no `.codex/hooks.json`: Codex writes hook trust under `~/.codex`.
 - The project `.codex/` layer applies only to a trusted project, and trust normally lives in `~/.codex/config.toml`. Orca cannot pass Codex flags, so `init-hub` prints a launch command that injects trust on the command line:
 
@@ -80,7 +86,7 @@ The Codex path has not been verified on a real machine. After starting it, run `
 
 Without `--sandbox read-only` a folder outside git may be writable, and `AGENTS.md` alone enforces nothing.
 
-Known gap: an `allow` rule runs its whole command outside the sandbox, so options of allowlisted commands can still write (`find -delete`, `git branch -D`, `gh api -X DELETE`). The same options pass the Claude Code Guard; see the known gaps in `references/hub-json.md`.
+Known gap: an `allow` rule runs its whole command outside the sandbox, so options of allowlisted commands can still write (`find -delete`, `git branch -D`, `gh api -X DELETE`); the Claude Code Guard refuses the `find` actions, Codex does not. The other options pass the Claude Code Guard; see the known gaps in `references/hub-json.md`.
 
 ## How to read a denial
 
